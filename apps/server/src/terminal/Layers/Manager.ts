@@ -92,6 +92,7 @@ interface TerminalStartInput {
   rows: number;
   env?: Record<string, string>;
   launch: TerminalLaunch;
+  startupInput?: string;
 }
 
 type TerminalActivityMode = "subprocess" | "lifetime";
@@ -120,6 +121,8 @@ interface TerminalSessionState {
   runtimeEnv: Record<string, string> | null;
   launch: TerminalLaunch;
   activityMode: TerminalActivityMode;
+  startupInput: string | null;
+  startupInputToken: number;
 }
 
 interface PersistHistoryRequest {
@@ -1410,6 +1413,22 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       };
     });
 
+    const flushStartupInput = (session: TerminalSessionState, startupInputToken: number): void => {
+      if (
+        session.startupInputToken !== startupInputToken ||
+        session.startupInput === null ||
+        session.process === null ||
+        session.status !== "running"
+      ) {
+        return;
+      }
+
+      const data = session.startupInput;
+      session.startupInput = null;
+      session.updatedAt = new Date().toISOString();
+      session.process.write(data);
+    };
+
     const startSession = Effect.fn("terminal.startSession")(function* (
       session: TerminalSessionState,
       input: TerminalStartInput,
@@ -1437,12 +1456,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         session.processEventDrainRunning = false;
         session.launch = input.launch;
         session.activityMode = terminalActivityModeForLaunch(input.launch);
+        session.startupInput = input.startupInput ?? null;
+        session.startupInputToken += 1;
         session.updatedAt = new Date().toISOString();
         return [undefined, state] as const;
       });
 
       let ptyProcess: PtyProcess | null = null;
       let startedLaunch: string | null = null;
+      const startupInputToken = session.startupInputToken;
 
       const startResult = yield* Effect.result(
         increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
@@ -1455,6 +1477,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
               const processPid = ptyProcess.pid;
               const unsubscribeData = ptyProcess.onData((data) => {
+                flushStartupInput(session, startupInputToken);
                 if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
                   return;
                 }
@@ -1730,6 +1753,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               runtimeEnv: normalizedRuntimeEnv(input.env),
               launch,
               activityMode: terminalActivityModeForLaunch(launch),
+              startupInput: null,
+              startupInputToken: 0,
             };
 
             const createdSession = session;
@@ -1751,6 +1776,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 rows,
                 ...(input.env ? { env: input.env } : {}),
                 launch,
+                ...(input.startupInput ? { startupInput: input.startupInput } : {}),
               },
               "started",
             );
@@ -1812,6 +1838,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 rows: targetRows,
                 ...(input.env ? { env: input.env } : {}),
                 launch: liveSession.launch,
+                ...(input.startupInput ? { startupInput: input.startupInput } : {}),
               },
               "started",
             );
@@ -1920,6 +1947,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               runtimeEnv: normalizedRuntimeEnv(input.env),
               launch,
               activityMode: terminalActivityModeForLaunch(launch),
+              startupInput: null,
+              startupInputToken: 0,
             };
             const createdSession = session;
             yield* modifyManagerState((state) => {
@@ -1959,6 +1988,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               rows,
               ...(input.env ? { env: input.env } : {}),
               launch: session.launch,
+              ...(input.startupInput ? { startupInput: input.startupInput } : {}),
             },
             "restarted",
           );

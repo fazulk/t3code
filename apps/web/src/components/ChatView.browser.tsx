@@ -2613,6 +2613,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
             env: {
               T3CODE_PROJECT_ROOT: "/repo/project",
             },
+            startupInput: "\u001b[200~Review the current branch.\u001b[201~",
             launch: {
               kind: "process",
               executable: "/opt/codex",
@@ -2624,21 +2625,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
         { timeout: 8_000, interval: 16 },
       );
 
-      await vi.waitFor(
-        () => {
-          expect(
-            wsRequests.find(
-              (request) =>
-                request._tag === WS_METHODS.terminalWrite && request.threadId === THREAD_ID,
-            ),
-          ).toMatchObject({
-            _tag: WS_METHODS.terminalWrite,
-            threadId: THREAD_ID,
-            data: "\u001b[200~Review the current branch.\u001b[201~",
-          });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      expect(
+        wsRequests.some(
+          (request) => request._tag === WS_METHODS.terminalWrite && request.threadId === THREAD_ID,
+        ),
+      ).toBe(false);
     } finally {
       await mounted.cleanup();
     }
