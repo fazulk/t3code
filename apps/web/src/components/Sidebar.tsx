@@ -18,6 +18,8 @@ import {
   ThreadStatusLabel,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { GitHubIcon } from "./Icons";
+import { parseGitHubRepositoryNameWithOwnerFromRemoteUrl } from "@t3tools/shared/git";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -996,6 +998,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     });
   }, []);
+  const githubUrl = useMemo<string | null>(() => {
+    const identity = project.repositoryIdentity;
+    if (!identity || identity.provider !== "github") return null;
+    const nameWithOwner = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(
+      identity.locator.remoteUrl,
+    );
+    if (nameWithOwner) return `https://github.com/${nameWithOwner}`;
+    // Fallback for self-hosted GitHub or non-github.com hosts where the parser misses
+    return identity.canonicalKey ? `https://${identity.canonicalKey}` : null;
+  }, [project.repositoryIdentity]);
   const sidebarThreads = useStore(
     useShallow(
       useMemo(
@@ -1974,6 +1986,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             ) : null}
           </span>
         </SidebarMenuButton>
+        {githubUrl ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Open ${project.displayName} on GitHub`}
+                  data-testid="open-github-button"
+                  className="absolute top-1 right-7 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => openPrLink(event, githubUrl)}
+                >
+                  <GitHubIcon className="size-3.5" />
+                </button>
+              }
+            />
+            <TooltipPopup side="top">Open on GitHub</TooltipPopup>
+          </Tooltip>
+        ) : null}
         {/* Environment badge – visible by default, crossfades with the
             "new thread" button on hover using the same pointer-events +
             opacity pattern as the thread row archive/timestamp swap. */}

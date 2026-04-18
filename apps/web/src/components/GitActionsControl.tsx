@@ -405,6 +405,7 @@ export default function GitActionsControl({
         includesCommit: pendingDefaultBranchAction.includesCommit,
       })
     : null;
+  const openPrUrl = gitStatusForActions?.pr?.state === "open" ? gitStatusForActions.pr.url : null;
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -464,8 +465,7 @@ export default function GitActionsControl({
       });
       return;
     }
-    const prUrl = gitStatusForActions?.pr?.state === "open" ? gitStatusForActions.pr.url : null;
-    if (!prUrl) {
+    if (!openPrUrl) {
       toastManager.add({
         type: "error",
         title: "No open PR found.",
@@ -473,7 +473,7 @@ export default function GitActionsControl({
       });
       return;
     }
-    void api.shell.openExternal(prUrl).catch((err: unknown) => {
+    void api.shell.openExternal(openPrUrl).catch((err: unknown) => {
       toastManager.add({
         type: "error",
         title: "Unable to open PR link",
@@ -481,7 +481,7 @@ export default function GitActionsControl({
         data: threadToastData,
       });
     });
-  }, [gitStatusForActions, threadToastData]);
+  }, [openPrUrl, threadToastData]);
 
   runGitActionWithToast = useEffectEvent(
     async ({

@@ -11,6 +11,7 @@ import {
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
+  resolveGitStatusCwd,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
   waitForStartedServerThread,
@@ -91,6 +92,42 @@ describe("resolveSendEnvMode", () => {
   it("forces local mode for non-git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
     expect(resolveSendEnvMode({ requestedEnvMode: "local", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("resolveGitStatusCwd", () => {
+  it("uses the thread worktree when terminal launch context is unavailable", () => {
+    expect(
+      resolveGitStatusCwd({
+        projectCwd: "/repo/project",
+        threadWorktreePath: "/repo/worktrees/feature-a",
+        terminalLaunchContext: null,
+      }),
+    ).toBe("/repo/worktrees/feature-a");
+  });
+
+  it("prefers a terminal launch-context worktree while thread metadata catches up", () => {
+    expect(
+      resolveGitStatusCwd({
+        projectCwd: "/repo/project",
+        threadWorktreePath: null,
+        terminalLaunchContext: {
+          worktreePath: "/repo/worktrees/feature-a",
+        },
+      }),
+    ).toBe("/repo/worktrees/feature-a");
+  });
+
+  it("lets launch context clear a stale server worktree path", () => {
+    expect(
+      resolveGitStatusCwd({
+        projectCwd: "/repo/project",
+        threadWorktreePath: "/repo/worktrees/feature-a",
+        terminalLaunchContext: {
+          worktreePath: null,
+        },
+      }),
+    ).toBe("/repo/project");
   });
 });
 

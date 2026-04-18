@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { ThreadId } from "@t3tools/contracts";
+import { type GitStatusResult, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 const SHARED_THREAD_ID = ThreadId.make("thread-shared");
@@ -25,9 +25,12 @@ function createDeferredPromise<T>() {
 const {
   activeRunStackedActionDeferredRef,
   activeDraftThreadRef,
+  gitStatusRef,
   hasServerThreadRef,
   invalidateGitQueriesSpy,
+  openExternalSpy,
   refreshGitStatusSpy,
+  localApiRef,
   runStackedActionMutateAsyncSpy,
   setDraftThreadContextSpy,
   setThreadBranchSpy,
@@ -38,9 +41,18 @@ const {
 } = vi.hoisted(() => ({
   activeRunStackedActionDeferredRef: { current: createDeferredPromise<never>() },
   activeDraftThreadRef: { current: null as unknown },
+  gitStatusRef: { current: null as GitStatusResult | null },
   hasServerThreadRef: { current: true },
   invalidateGitQueriesSpy: vi.fn(() => Promise.resolve()),
+  openExternalSpy: vi.fn(() => Promise.resolve()),
   refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
+  localApiRef: {
+    current: {
+      shell: {
+        openExternal: vi.fn(() => Promise.resolve()),
+      },
+    } as { shell: { openExternal: ReturnType<typeof vi.fn> } } | null,
+  },
   runStackedActionMutateAsyncSpy: vi.fn(() => activeRunStackedActionDeferredRef.current.promise),
   setDraftThreadContextSpy: vi.fn(),
   setThreadBranchSpy: vi.fn(),
@@ -111,15 +123,7 @@ vi.mock("~/lib/gitStatusState", () => ({
   refreshGitStatus: refreshGitStatusSpy,
   resetGitStatusStateForTests: () => undefined,
   useGitStatus: vi.fn(() => ({
-    data: {
-      branch: BRANCH_NAME,
-      hasWorkingTreeChanges: false,
-      workingTree: { files: [], insertions: 0, deletions: 0 },
-      hasUpstream: true,
-      aheadCount: 1,
-      behindCount: 0,
-      pr: null,
-    },
+    data: gitStatusRef.current,
     error: null,
     isPending: false,
   })),
@@ -129,7 +133,7 @@ vi.mock("~/localApi", () => ({
   ensureLocalApi: vi.fn(() => {
     throw new Error("ensureLocalApi not implemented in browser test");
   }),
-  readLocalApi: vi.fn(() => null),
+  readLocalApi: vi.fn(() => localApiRef.current),
 }));
 
 vi.mock("~/composerDraftStore", async () => {
@@ -245,6 +249,22 @@ vi.mock("~/terminal-links", () => ({
 
 import GitActionsControl from "./GitActionsControl";
 
+function buildGitStatus(overrides: Partial<GitStatusResult> = {}): GitStatusResult {
+  return {
+    isRepo: true,
+    hasOriginRemote: true,
+    isDefaultBranch: false,
+    branch: BRANCH_NAME,
+    hasWorkingTreeChanges: false,
+    workingTree: { files: [], insertions: 0, deletions: 0 },
+    hasUpstream: true,
+    aheadCount: 1,
+    behindCount: 0,
+    pr: null,
+    ...overrides,
+  };
+}
+
 function findButtonByText(text: string): HTMLButtonElement | null {
   return (Array.from(document.querySelectorAll("button")).find((button) =>
     button.textContent?.includes(text),
@@ -270,12 +290,21 @@ function Harness() {
 }
 
 describe("GitActionsControl thread-scoped progress toast", () => {
+  beforeEach(() => {
+    activeRunStackedActionDeferredRef.current = createDeferredPromise<never>();
+    activeDraftThreadRef.current = null;
+    gitStatusRef.current = buildGitStatus();
+    hasServerThreadRef.current = true;
+    localApiRef.current = {
+      shell: {
+        openExternal: openExternalSpy,
+      },
+    };
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
-    activeRunStackedActionDeferredRef.current = createDeferredPromise<never>();
-    activeDraftThreadRef.current = null;
-    hasServerThreadRef.current = true;
     document.body.innerHTML = "";
   });
 
@@ -333,8 +362,6 @@ describe("GitActionsControl thread-scoped progress toast", () => {
         }),
       );
     } finally {
-      activeRunStackedActionDeferredRef.current.reject(new Error("test cleanup"));
-      await Promise.resolve();
       vi.useRealTimers();
       await screen.unmount();
       host.remove();
@@ -454,6 +481,166 @@ describe("GitActionsControl thread-scoped progress toast", () => {
 
       expect(setDraftThreadContextSpy).not.toHaveBeenCalled();
       expect(setThreadBranchSpy).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("renders the View PR quick action and opens the PR URL when an open PR exists", async () => {
+    gitStatusRef.current = buildGitStatus({
+      aheadCount: 0,
+      pr: {
+        number: 42,
+        title: "Existing PR",
+        url: "https://example.com/pr/42",
+        baseBranch: "main",
+        headBranch: BRANCH_NAME,
+        state: "open",
+      },
+    });
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
+      />,
+      {
+        container: host,
+      },
+    );
+
+    try {
+      const quickActionButton = findButtonByText("View PR");
+      expect(quickActionButton, 'Unable to find button containing "View PR"').toBeTruthy();
+      if (!(quickActionButton instanceof HTMLButtonElement)) {
+        throw new Error('Unable to find button containing "View PR"');
+      }
+
+      quickActionButton.click();
+      await Promise.resolve();
+
+      expect(openExternalSpy).toHaveBeenCalledWith("https://example.com/pr/42");
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("hides the quick View PR action when the PR is not open", async () => {
+    gitStatusRef.current = buildGitStatus({
+      pr: {
+        number: 43,
+        title: "Closed PR",
+        url: "https://example.com/pr/43",
+        baseBranch: "main",
+        headBranch: BRANCH_NAME,
+        state: "closed",
+      },
+    });
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
+      />,
+      {
+        container: host,
+      },
+    );
+
+    try {
+      expect(findButtonByText("View PR")).toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("keeps the primary action as commit and push when local changes exist even with an open PR", async () => {
+    gitStatusRef.current = buildGitStatus({
+      hasWorkingTreeChanges: true,
+      pr: {
+        number: 44,
+        title: "Open PR",
+        url: "https://example.com/pr/44",
+        baseBranch: "main",
+        headBranch: BRANCH_NAME,
+        state: "open",
+      },
+    });
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
+      />,
+      {
+        container: host,
+      },
+    );
+
+    try {
+      const quickActionButton = findButtonByText("Commit & push");
+      expect(quickActionButton, 'Unable to find button containing "Commit & push"').toBeTruthy();
+      expect(findButtonByText("View PR")).toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("shows an error toast when opening the quick-action PR URL fails", async () => {
+    gitStatusRef.current = buildGitStatus({
+      aheadCount: 0,
+      pr: {
+        number: 45,
+        title: "Open PR",
+        url: "https://example.com/pr/45",
+        baseBranch: "main",
+        headBranch: BRANCH_NAME,
+        state: "open",
+      },
+    });
+    openExternalSpy.mockRejectedValueOnce(new Error("Browser blocked"));
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
+      />,
+      {
+        container: host,
+      },
+    );
+
+    try {
+      const quickActionButton = findButtonByText("View PR");
+      expect(quickActionButton, 'Unable to find button containing "View PR"').toBeTruthy();
+      if (!(quickActionButton instanceof HTMLButtonElement)) {
+        throw new Error('Unable to find button containing "View PR"');
+      }
+
+      quickActionButton.click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(toastAddSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "error",
+          title: "Unable to open PR link",
+          description: "Browser blocked",
+          data: { threadRef: scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID) },
+        }),
+      );
     } finally {
       await screen.unmount();
       host.remove();

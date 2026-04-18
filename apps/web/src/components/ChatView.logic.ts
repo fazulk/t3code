@@ -7,6 +7,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { projectScriptCwd } from "@t3tools/shared/projectScripts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import { Schema } from "effect";
@@ -161,6 +162,26 @@ export function resolveSendEnvMode(input: {
   isGitRepo: boolean;
 }): DraftThreadEnvMode {
   return input.isGitRepo ? input.requestedEnvMode : "local";
+}
+
+export function resolveGitStatusCwd(input: {
+  projectCwd: string | null;
+  threadWorktreePath: string | null;
+  terminalLaunchContext: {
+    worktreePath: string | null;
+  } | null;
+}): string | null {
+  if (input.projectCwd === null) {
+    return null;
+  }
+
+  return projectScriptCwd({
+    project: { cwd: input.projectCwd },
+    worktreePath:
+      input.terminalLaunchContext !== null
+        ? input.terminalLaunchContext.worktreePath
+        : input.threadWorktreePath,
+  });
 }
 
 export function cloneComposerImageForRetry(
