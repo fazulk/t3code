@@ -69,6 +69,7 @@ describe("decider project scripts", () => {
 
     const scripts = [
       {
+        kind: "shell",
         id: "lint",
         name: "Lint",
         command: "bun run lint",
@@ -83,6 +84,76 @@ describe("decider project scripts", () => {
           type: "project.meta.update",
           commandId: CommandId.make("cmd-project-update-scripts"),
           projectId: asProjectId("project-scripts"),
+          scripts: Array.from(scripts),
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("project.meta-updated");
+    expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
+  });
+
+  it("propagates mixed shell and agent project actions in project.meta.update payload", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const readModel = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-actions"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-actions"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-create-actions"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-create-actions"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-actions"),
+          title: "Actions",
+          workspaceRoot: "/tmp/actions",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const scripts = [
+      {
+        kind: "shell",
+        id: "lint",
+        name: "Lint",
+        command: "bun run lint",
+        icon: "lint",
+        runOnWorktreeCreate: false,
+      },
+      {
+        kind: "agent",
+        id: "review",
+        name: "Review",
+        icon: "agent",
+        modelSelection: {
+          provider: "codex" as const,
+          model: "gpt-5.4",
+        },
+        prompt: "Review the current branch.",
+        submitPromptOnLaunch: true,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        runOnWorktreeCreate: false,
+      },
+    ] as const;
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-project-update-actions"),
+          projectId: asProjectId("project-actions"),
           scripts: Array.from(scripts),
         },
         readModel,

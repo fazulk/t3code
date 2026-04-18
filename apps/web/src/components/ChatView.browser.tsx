@@ -2158,6 +2158,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: withProjectScripts(createDraftOnlySnapshot(), [
         {
+          kind: "shell",
           id: "lint",
           name: "Lint",
           command: "bun run lint",
@@ -2237,6 +2238,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: withProjectScripts(createDraftOnlySnapshot(), [
         {
+          kind: "shell",
           id: "test",
           name: "Test",
           command: "bun run test",
@@ -2278,6 +2280,382 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("runs agent actions from local draft threads in a fresh terminal without terminal writes", async () => {
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [THREAD_KEY]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: THREAD_KEY,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(createDraftOnlySnapshot(), [
+        {
+          kind: "agent",
+          id: "review",
+          name: "Review",
+          icon: "agent",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+            options: {
+              reasoningEffort: "xhigh",
+              fastMode: true,
+            },
+          },
+          prompt: "Review the current branch.",
+          submitPromptOnLaunch: true,
+          runtimeMode: "auto-accept-edits",
+          interactionMode: "plan",
+          runOnWorktreeCreate: false,
+        },
+      ]),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            providers: {
+              ...nextFixture.serverConfig.settings.providers,
+              codex: {
+                ...nextFixture.serverConfig.settings.providers.codex,
+                binaryPath: "/opt/codex",
+                homePath: "/Users/test/.codex",
+              },
+            },
+          },
+        };
+      },
+    });
+
+    try {
+      const runButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Review",
+          ) as HTMLButtonElement | null,
+        "Unable to find Run Review button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+          ) as Record<string, unknown> | undefined;
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            threadId: THREAD_ID,
+            cwd: "/repo/project",
+            env: {
+              T3CODE_PROJECT_ROOT: "/repo/project",
+              CODEX_HOME: "/Users/test/.codex",
+            },
+            launch: {
+              kind: "process",
+              executable: "/opt/codex",
+              args: [
+                "-m",
+                "gpt-5.4",
+                "-s",
+                "workspace-write",
+                "-a",
+                "on-request",
+                "-c",
+                'model_reasoning_effort="xhigh"',
+                "-c",
+                'service_tier="fast"',
+                [
+                  "Plan mode:",
+                  "Analyze the request, inspect the codebase as needed, and return a concrete plan before making changes.",
+                  "Do not edit files or run mutating commands until the user explicitly asks you to proceed.",
+                  "",
+                  "Review the current branch.",
+                ].join("\n"),
+              ],
+            },
+          });
+          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      expect(
+        wsRequests.some(
+          (request) => request._tag === WS_METHODS.terminalWrite && request.threadId === THREAD_ID,
+        ),
+      ).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs agent actions from worktree draft threads at the worktree cwd", async () => {
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [THREAD_KEY]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature/draft",
+          worktreePath: "/repo/worktrees/feature-draft",
+          envMode: "worktree",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: THREAD_KEY,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(createDraftOnlySnapshot(), [
+        {
+          kind: "agent",
+          id: "claude-review",
+          name: "Claude Review",
+          icon: "agent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+            options: {
+              effort: "max",
+              thinking: false,
+              contextWindow: "1m",
+            },
+          },
+          prompt: "Summarize the worktree status.",
+          submitPromptOnLaunch: true,
+          runtimeMode: "approval-required",
+          interactionMode: "plan",
+          runOnWorktreeCreate: false,
+        },
+      ]),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            nextFixture.serverConfig.providers[0]!,
+            {
+              provider: "claudeAgent",
+              enabled: true,
+              installed: true,
+              version: "1.0.0",
+              status: "ready",
+              auth: { status: "authenticated" },
+              checkedAt: NOW_ISO,
+              models: [
+                {
+                  slug: "claude-sonnet-4-6",
+                  name: "Claude Sonnet 4.6",
+                  isCustom: false,
+                  capabilities: null,
+                },
+              ],
+              slashCommands: [],
+              skills: [],
+            },
+          ],
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            providers: {
+              ...nextFixture.serverConfig.settings.providers,
+              claudeAgent: {
+                ...nextFixture.serverConfig.settings.providers.claudeAgent,
+                binaryPath: "/opt/claude",
+                launchArgs: "--chrome --verbose",
+              },
+            },
+          },
+        };
+      },
+    });
+
+    try {
+      const runButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Claude Review",
+          ) as HTMLButtonElement | null,
+        "Unable to find Run Claude Review button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+          ) as Record<string, unknown> | undefined;
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            threadId: THREAD_ID,
+            cwd: "/repo/worktrees/feature-draft",
+            worktreePath: "/repo/worktrees/feature-draft",
+            env: {
+              T3CODE_PROJECT_ROOT: "/repo/project",
+              T3CODE_WORKTREE_PATH: "/repo/worktrees/feature-draft",
+            },
+            launch: {
+              kind: "process",
+              executable: "/opt/claude",
+              args: [
+                "--chrome",
+                "--verbose",
+                "--model",
+                "claude-sonnet-4-6[1m]",
+                "--effort",
+                "max",
+                "--settings",
+                JSON.stringify({ alwaysThinkingEnabled: false }),
+                "--permission-mode",
+                "plan",
+                "Summarize the worktree status.",
+              ],
+            },
+          });
+          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      expect(
+        wsRequests.some(
+          (request) => request._tag === WS_METHODS.terminalWrite && request.threadId === THREAD_ID,
+        ),
+      ).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("starts agent actions and pastes the prompt for editing when auto-submit is disabled", async () => {
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [THREAD_KEY]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: THREAD_KEY,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(createDraftOnlySnapshot(), [
+        {
+          kind: "agent",
+          id: "review",
+          name: "Review",
+          icon: "agent",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+          },
+          prompt: "Review the current branch.",
+          submitPromptOnLaunch: false,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          runOnWorktreeCreate: false,
+        },
+      ]),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            providers: {
+              ...nextFixture.serverConfig.settings.providers,
+              codex: {
+                ...nextFixture.serverConfig.settings.providers.codex,
+                binaryPath: "/opt/codex",
+              },
+            },
+          },
+        };
+      },
+    });
+
+    try {
+      const runButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Review",
+          ) as HTMLButtonElement | null,
+        "Unable to find Run Review button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+          ) as Record<string, unknown> | undefined;
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            threadId: THREAD_ID,
+            cwd: "/repo/project",
+            env: {
+              T3CODE_PROJECT_ROOT: "/repo/project",
+            },
+            launch: {
+              kind: "process",
+              executable: "/opt/codex",
+              args: ["-m", "gpt-5.4", "-s", "danger-full-access", "-a", "never"],
+            },
+          });
+          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.find(
+              (request) =>
+                request._tag === WS_METHODS.terminalWrite && request.threadId === THREAD_ID,
+            ),
+          ).toMatchObject({
+            _tag: WS_METHODS.terminalWrite,
+            threadId: THREAD_ID,
+            data: "\u001b[200~Review the current branch.\u001b[201~",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("lets the server own setup after preparing a pull request worktree thread", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
@@ -2303,6 +2681,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: WIDE_FOOTER_VIEWPORT,
       snapshot: withProjectScripts(createDraftOnlySnapshot(), [
         {
+          kind: "shell",
           id: "setup",
           name: "Setup",
           command: "bun install",
@@ -2431,6 +2810,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: withProjectScripts(createDraftOnlySnapshot(), [
         {
+          kind: "shell",
           id: "setup",
           name: "Setup",
           command: "bun install",
@@ -2820,6 +3200,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: withProjectScripts(createDraftOnlySnapshot(), [
         {
+          kind: "shell",
           id: "setup",
           name: "Setup",
           command: "bun install",

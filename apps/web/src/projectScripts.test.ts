@@ -1,3 +1,4 @@
+import type { ProjectScript } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 import {
   projectScriptCwd,
@@ -27,20 +28,29 @@ describe("projectScripts helpers", () => {
   });
 
   it("resolves primary and setup scripts", () => {
-    const scripts = [
+    const scripts: ProjectScript[] = [
       {
+        kind: "shell",
         id: "setup",
         name: "Setup",
         command: "bun install",
-        icon: "configure" as const,
+        icon: "configure",
         runOnWorktreeCreate: true,
       },
       {
+        kind: "agent",
         id: "test",
         name: "Test",
-        command: "bun test",
-        icon: "test" as const,
-        runOnWorktreeCreate: false,
+        icon: "agent",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
+        prompt: "Review the repository.",
+        submitPromptOnLaunch: true,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        runOnWorktreeCreate: false as const,
       },
     ];
 
