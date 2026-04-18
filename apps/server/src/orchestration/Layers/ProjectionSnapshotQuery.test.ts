@@ -49,7 +49,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'Project 1',
           '/tmp/project-1',
           '{"provider":"codex","model":"gpt-5-codex"}',
-          '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
+          '[{"kind":"shell","id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           '2026-02-24T00:00:00.000Z',
           '2026-02-24T00:00:01.000Z',
           NULL
@@ -257,6 +257,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           },
           scripts: [
             {
+              kind: "shell",
               id: "script-1",
               name: "Build",
               command: "bun run build",
@@ -368,6 +369,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           },
           scripts: [
             {
+              kind: "shell",
               id: "script-1",
               name: "Build",
               command: "bun run build",

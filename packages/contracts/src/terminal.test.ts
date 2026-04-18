@@ -6,7 +6,9 @@ import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
+  TerminalLaunch,
   TerminalOpenInput,
+  TerminalRestartInput,
   TerminalResizeInput,
   TerminalSessionSnapshot,
   TerminalThreadInput,
@@ -78,6 +80,26 @@ describe("TerminalOpenInput", () => {
     expect(parsed.worktreePath).toBe("/tmp/project/.t3/worktrees/feature-a");
   });
 
+  it("accepts direct process launches", () => {
+    const parsed = decodeSync(TerminalOpenInput, {
+      threadId: "thread-1",
+      cwd: "/tmp/project",
+      cols: 100,
+      rows: 24,
+      launch: {
+        kind: "process",
+        executable: "codex",
+        args: ["-m", "gpt-5.4", "Review this repo"],
+      },
+    });
+
+    expect(parsed.launch).toEqual({
+      kind: "process",
+      executable: "codex",
+      args: ["-m", "gpt-5.4", "Review this repo"],
+    });
+  });
+
   it("rejects invalid env keys", () => {
     expect(
       decodes(TerminalOpenInput, {
@@ -127,6 +149,22 @@ describe("TerminalResizeInput", () => {
         threadId: "thread-1",
         cols: 80,
         rows: 24,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("TerminalRestartInput", () => {
+  it("accepts optional launch overrides", () => {
+    expect(
+      decodes(TerminalRestartInput, {
+        threadId: "thread-1",
+        cwd: "/tmp/project",
+        cols: 100,
+        rows: 24,
+        launch: {
+          kind: "shell",
+        },
       }),
     ).toBe(true);
   });
@@ -228,6 +266,16 @@ describe("TerminalEvent", () => {
           exitSignal: null,
           updatedAt: new Date().toISOString(),
         },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("TerminalLaunch", () => {
+  it("accepts explicit shell launches", () => {
+    expect(
+      decodes(TerminalLaunch, {
+        kind: "shell",
       }),
     ).toBe(true);
   });

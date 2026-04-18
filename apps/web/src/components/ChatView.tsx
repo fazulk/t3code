@@ -27,7 +27,13 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
-import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
+import {
+  buildAgentTerminalLaunch,
+  isAgentProjectScript,
+  isShellProjectScript,
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+} from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -314,6 +320,10 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+
+function encodeTerminalBracketedPaste(text: string): string {
+  return `\u001b[200~${text}\u001b[201~`;
+}
 
 type ChatViewProps =
   | {
@@ -1640,6 +1650,10 @@ export default function ChatView(props: ChatViewProps) {
     ) => {
       const api = readEnvironmentApi(environmentId);
       if (!api || !activeThreadId || !activeProject || !activeThread) return;
+      if (isAgentProjectScript(script) && !serverConfig) {
+        setThreadError(activeThreadId, "Server configuration is unavailable for agent launches.");
+        return;
+      }
       if (options?.rememberAsLastInvoked !== false) {
         setLastInvokedScriptByProjectId((current) => {
           if (current[activeProject.id] === script.id) return current;
@@ -1653,7 +1667,7 @@ export default function ChatView(props: ChatViewProps) {
         DEFAULT_THREAD_TERMINAL_ID;
       const isBaseTerminalBusy = terminalState.runningTerminalIds.includes(baseTerminalId);
       const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal = wantsNewTerminal;
+      const shouldCreateNewTerminal = isAgentProjectScript(script) ? true : wantsNewTerminal;
       const targetTerminalId = shouldCreateNewTerminal
         ? `terminal-${randomUUID()}`
         : baseTerminalId;
@@ -1682,31 +1696,64 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
-        ? {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
-            cols: SCRIPT_TERMINAL_COLS,
-            rows: SCRIPT_TERMINAL_ROWS,
-          }
-        : {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
-          };
 
       try {
+        let agentLaunchSpec: ReturnType<typeof buildAgentTerminalLaunch> | null = null;
+        const openTerminalInput: TerminalOpenInput = isAgentProjectScript(script)
+          ? (() => {
+              if (!serverConfig) {
+                throw new Error("Server configuration is unavailable for agent launches.");
+              }
+              agentLaunchSpec = buildAgentTerminalLaunch({
+                action: script,
+                cwd: targetCwd,
+                env: runtimeEnv,
+                settings: serverConfig.settings,
+              });
+              return {
+                threadId: activeThreadId,
+                terminalId: targetTerminalId,
+                cwd: agentLaunchSpec.cwd,
+                ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
+                env: agentLaunchSpec.env,
+                launch: agentLaunchSpec.launch,
+                cols: SCRIPT_TERMINAL_COLS,
+                rows: SCRIPT_TERMINAL_ROWS,
+              };
+            })()
+          : shouldCreateNewTerminal
+            ? {
+                threadId: activeThreadId,
+                terminalId: targetTerminalId,
+                cwd: targetCwd,
+                ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
+                env: runtimeEnv,
+                cols: SCRIPT_TERMINAL_COLS,
+                rows: SCRIPT_TERMINAL_ROWS,
+              }
+            : {
+                threadId: activeThreadId,
+                terminalId: targetTerminalId,
+                cwd: targetCwd,
+                ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
+                env: runtimeEnv,
+              };
+
         await api.terminal.open(openTerminalInput);
-        await api.terminal.write({
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          data: `${script.command}\r`,
-        });
+        if (isShellProjectScript(script)) {
+          await api.terminal.write({
+            threadId: activeThreadId,
+            terminalId: targetTerminalId,
+            data: `${script.command}\r`,
+          });
+        }
+        if (agentLaunchSpec?.prefillInput) {
+          await api.terminal.write({
+            threadId: activeThreadId,
+            terminalId: targetTerminalId,
+            data: encodeTerminalBracketedPaste(agentLaunchSpec.prefillInput),
+          });
+        }
       } catch (error) {
         setThreadError(
           activeThreadId,
@@ -1726,6 +1773,7 @@ export default function ChatView(props: ChatViewProps) {
       storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
       environmentId,
+      serverConfig,
       terminalState.activeTerminalId,
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
@@ -1773,21 +1821,39 @@ export default function ChatView(props: ChatViewProps) {
         input.name,
         activeProject.scripts.map((script) => script.id),
       );
-      const nextScript: ProjectScript = {
-        id: nextId,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
+      const nextScript: ProjectScript =
+        input.kind === "agent"
+          ? {
+              kind: "agent",
+              id: nextId,
+              name: input.name,
+              icon: input.icon,
+              modelSelection: input.modelSelection,
+              prompt: input.prompt,
+              submitPromptOnLaunch: input.submitPromptOnLaunch,
+              runtimeMode: input.runtimeMode,
+              interactionMode: input.interactionMode,
+              runOnWorktreeCreate: false,
+            }
+          : {
+              kind: "shell",
+              id: nextId,
+              name: input.name,
+              command: input.command,
+              icon: input.icon,
+              runOnWorktreeCreate: input.runOnWorktreeCreate,
+            };
+      const nextScripts =
+        input.kind === "shell" && input.runOnWorktreeCreate
+          ? [
+              ...activeProject.scripts.map((script) =>
+                isShellProjectScript(script) && script.runOnWorktreeCreate
+                  ? { ...script, runOnWorktreeCreate: false }
+                  : script,
+              ),
+              nextScript,
+            ]
+          : [...activeProject.scripts, nextScript];
 
       await persistProjectScripts({
         projectId: activeProject.id,
@@ -1808,17 +1874,32 @@ export default function ChatView(props: ChatViewProps) {
         throw new Error("Script not found.");
       }
 
-      const updatedScript: ProjectScript = {
-        ...existingScript,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
+      const updatedScript: ProjectScript =
+        input.kind === "agent"
+          ? {
+              kind: "agent",
+              id: existingScript.id,
+              name: input.name,
+              icon: input.icon,
+              modelSelection: input.modelSelection,
+              prompt: input.prompt,
+              submitPromptOnLaunch: input.submitPromptOnLaunch,
+              runtimeMode: input.runtimeMode,
+              interactionMode: input.interactionMode,
+              runOnWorktreeCreate: false,
+            }
+          : {
+              kind: "shell",
+              id: existingScript.id,
+              name: input.name,
+              command: input.command,
+              icon: input.icon,
+              runOnWorktreeCreate: input.runOnWorktreeCreate,
+            };
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
           ? updatedScript
-          : input.runOnWorktreeCreate
+          : input.kind === "shell" && input.runOnWorktreeCreate && isShellProjectScript(script)
             ? { ...script, runOnWorktreeCreate: false }
             : script,
       );
@@ -3229,6 +3310,7 @@ export default function ChatView(props: ChatViewProps) {
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
           activeProjectScripts={activeProject?.scripts}
+          providers={providerStatuses}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
           }

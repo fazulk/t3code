@@ -2245,6 +2245,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         projectId: ProjectId.make("project-scripts"),
         scripts: [
           {
+            kind: "shell",
             id: "script-1",
             name: "Build",
             command: "bun run build",
@@ -2271,7 +2272,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       assert.deepEqual(projectRows, [
         {
           scriptsJson:
-            '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
+            '[{"kind":"shell","id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           defaultModelSelection: '{"provider":"codex","model":"gpt-5"}',
         },
       ]);

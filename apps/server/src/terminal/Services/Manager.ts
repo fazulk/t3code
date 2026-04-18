@@ -13,6 +13,7 @@ import {
   TerminalCwdError,
   TerminalError,
   TerminalHistoryError,
+  TerminalLaunch,
   TerminalNotRunningError,
   TerminalOpenInput,
   TerminalResizeInput,
@@ -52,6 +53,7 @@ export interface TerminalSessionState {
   unsubscribeExit: (() => void) | null;
   hasRunningSubprocess: boolean;
   runtimeEnv: Record<string, string> | null;
+  launch: TerminalLaunch;
 }
 
 export interface ShellCandidate {

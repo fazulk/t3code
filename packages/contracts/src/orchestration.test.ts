@@ -151,6 +151,109 @@ it.effect("decodes project.meta-updated payloads with explicit default provider"
   }),
 );
 
+it.effect("decodes legacy shell project scripts without an explicit kind", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeProjectMetaUpdatedPayload({
+      projectId: "project-1",
+      scripts: [
+        {
+          id: "lint",
+          name: "Lint",
+          command: "bun run lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.scripts, [
+      {
+        kind: "shell",
+        id: "lint",
+        name: "Lint",
+        command: "bun run lint",
+        icon: "lint",
+        runOnWorktreeCreate: false,
+      },
+    ]);
+  }),
+);
+
+it.effect("decodes mixed shell and agent project scripts", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeProjectMetaUpdatedPayload({
+      projectId: "project-1",
+      scripts: [
+        {
+          id: "lint",
+          name: "Lint",
+          command: "bun run lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+        {
+          kind: "agent",
+          id: "triage",
+          name: "Triage",
+          icon: "agent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+          prompt: "Review the current branch and summarize the highest-risk changes.",
+          runOnWorktreeCreate: false,
+        },
+      ],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.scripts?.[0]?.kind, "shell");
+    assert.strictEqual(parsed.scripts?.[1]?.kind, "agent");
+    assert.deepStrictEqual(parsed.scripts?.[1], {
+      kind: "agent",
+      id: "triage",
+      name: "Triage",
+      icon: "agent",
+      modelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+      },
+      prompt: "Review the current branch and summarize the highest-risk changes.",
+      submitPromptOnLaunch: true,
+      runtimeMode: DEFAULT_RUNTIME_MODE,
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runOnWorktreeCreate: false,
+    });
+  }),
+);
+
+it.effect("decodes legacy agent project scripts with auto-submit enabled by default", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeProjectMetaUpdatedPayload({
+      projectId: "project-1",
+      scripts: [
+        {
+          kind: "agent",
+          id: "triage",
+          name: "Triage",
+          icon: "agent",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+          },
+          prompt: "Review the current branch.",
+          runOnWorktreeCreate: false,
+        },
+      ],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.scripts?.[0]?.kind, "agent");
+    assert.strictEqual(parsed.scripts?.[0]?.submitPromptOnLaunch, true);
+  }),
+);
+
 it.effect("rejects command fields that become empty after trim", () =>
   Effect.gen(function* () {
     const result = yield* Effect.exit(

@@ -433,97 +433,97 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     <>
       <DiffPanelViewToggle />
       {diffView === "turns" ? (
-      <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
-        <button
-          type="button"
-          className={cn(
-            "absolute left-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
-            canScrollTurnStripLeft
-              ? "border-border/70 hover:border-border hover:text-foreground"
-              : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-          )}
-          onClick={() => scrollTurnStripBy(-180)}
-          disabled={!canScrollTurnStripLeft}
-          aria-label="Scroll turn list left"
-        >
-          <ChevronLeftIcon className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "absolute right-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
-            canScrollTurnStripRight
-              ? "border-border/70 hover:border-border hover:text-foreground"
-              : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-          )}
-          onClick={() => scrollTurnStripBy(180)}
-          disabled={!canScrollTurnStripRight}
-          aria-label="Scroll turn list right"
-        >
-          <ChevronRightIcon className="size-3.5" />
-        </button>
-        <div
-          ref={turnStripRef}
-          className="turn-chip-strip flex gap-1 overflow-x-auto px-8 py-0.5"
-          style={
-            canScrollTurnStripLeft || canScrollTurnStripRight
-              ? {
-                  maskImage: `linear-gradient(to right, ${canScrollTurnStripLeft ? "transparent 24px, black 72px" : "black"}, ${canScrollTurnStripRight ? "black calc(100% - 72px), transparent calc(100% - 24px)" : "black"})`,
-                }
-              : undefined
-          }
-          onWheel={onTurnStripWheel}
-        >
+        <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
           <button
             type="button"
-            className="shrink-0 rounded-md"
-            onClick={selectWholeConversation}
-            data-turn-chip-selected={selectedTurnId === null}
+            className={cn(
+              "absolute left-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
+              canScrollTurnStripLeft
+                ? "border-border/70 hover:border-border hover:text-foreground"
+                : "cursor-not-allowed border-border/40 text-muted-foreground/40",
+            )}
+            onClick={() => scrollTurnStripBy(-180)}
+            disabled={!canScrollTurnStripLeft}
+            aria-label="Scroll turn list left"
           >
-            <div
-              className={cn(
-                "rounded-md border px-2 py-1 text-left transition-colors",
-                selectedTurnId === null
-                  ? "border-border bg-accent text-accent-foreground"
-                  : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
-              )}
-            >
-              <div className="text-[10px] leading-tight font-medium">All turns</div>
-            </div>
+            <ChevronLeftIcon className="size-3.5" />
           </button>
-          {orderedTurnDiffSummaries.map((summary) => (
+          <button
+            type="button"
+            className={cn(
+              "absolute right-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
+              canScrollTurnStripRight
+                ? "border-border/70 hover:border-border hover:text-foreground"
+                : "cursor-not-allowed border-border/40 text-muted-foreground/40",
+            )}
+            onClick={() => scrollTurnStripBy(180)}
+            disabled={!canScrollTurnStripRight}
+            aria-label="Scroll turn list right"
+          >
+            <ChevronRightIcon className="size-3.5" />
+          </button>
+          <div
+            ref={turnStripRef}
+            className="turn-chip-strip flex gap-1 overflow-x-auto px-8 py-0.5"
+            style={
+              canScrollTurnStripLeft || canScrollTurnStripRight
+                ? {
+                    maskImage: `linear-gradient(to right, ${canScrollTurnStripLeft ? "transparent 24px, black 72px" : "black"}, ${canScrollTurnStripRight ? "black calc(100% - 72px), transparent calc(100% - 24px)" : "black"})`,
+                  }
+                : undefined
+            }
+            onWheel={onTurnStripWheel}
+          >
             <button
-              key={summary.turnId}
               type="button"
               className="shrink-0 rounded-md"
-              onClick={() => selectTurn(summary.turnId)}
-              title={summary.turnId}
-              data-turn-chip-selected={summary.turnId === selectedTurn?.turnId}
+              onClick={selectWholeConversation}
+              data-turn-chip-selected={selectedTurnId === null}
             >
               <div
                 className={cn(
                   "rounded-md border px-2 py-1 text-left transition-colors",
-                  summary.turnId === selectedTurn?.turnId
+                  selectedTurnId === null
                     ? "border-border bg-accent text-accent-foreground"
                     : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
                 )}
               >
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] leading-tight font-medium">
-                    Turn{" "}
-                    {summary.checkpointTurnCount ??
-                      inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                      "?"}
-                  </span>
-                  <span className="text-[9px] leading-tight opacity-70">
-                    {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
-                  </span>
-                </div>
+                <div className="text-[10px] leading-tight font-medium">All turns</div>
               </div>
             </button>
-          ))}
+            {orderedTurnDiffSummaries.map((summary) => (
+              <button
+                key={summary.turnId}
+                type="button"
+                className="shrink-0 rounded-md"
+                onClick={() => selectTurn(summary.turnId)}
+                title={summary.turnId}
+                data-turn-chip-selected={summary.turnId === selectedTurn?.turnId}
+              >
+                <div
+                  className={cn(
+                    "rounded-md border px-2 py-1 text-left transition-colors",
+                    summary.turnId === selectedTurn?.turnId
+                      ? "border-border bg-accent text-accent-foreground"
+                      : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+                  )}
+                >
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] leading-tight font-medium">
+                      Turn{" "}
+                      {summary.checkpointTurnCount ??
+                        inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+                        "?"}
+                    </span>
+                    <span className="text-[9px] leading-tight opacity-70">
+                      {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
       ) : (
         <div className="min-w-0 flex-1" />
       )}

@@ -10,8 +10,7 @@ export const DIFF_VIEW_SEARCH_KEY = "diffView";
 export function useDiffView(): DiffView {
   return useSearch({
     strict: false,
-    select: (s: Record<string, unknown>) =>
-      s[DIFF_VIEW_SEARCH_KEY] === "git" ? "git" : "turns",
+    select: (s: Record<string, unknown>) => (s[DIFF_VIEW_SEARCH_KEY] === "git" ? "git" : "turns"),
   });
 }
 

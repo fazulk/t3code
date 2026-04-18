@@ -131,16 +131,39 @@ export const ProjectScriptIcon = Schema.Literals([
   "configure",
   "build",
   "debug",
+  "agent",
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
-export const ProjectScript = Schema.Struct({
+export const ShellProjectAction = Schema.Struct({
+  kind: Schema.Literal("shell").pipe(Schema.withDecodingDefault(Effect.succeed("shell"))),
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
 });
+export type ShellProjectAction = typeof ShellProjectAction.Type;
+
+export const AgentProjectAction = Schema.Struct({
+  kind: Schema.Literal("agent"),
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  icon: ProjectScriptIcon,
+  modelSelection: ModelSelection,
+  prompt: TrimmedNonEmptyString,
+  submitPromptOnLaunch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  runOnWorktreeCreate: Schema.Literal(false).pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+});
+export type AgentProjectAction = typeof AgentProjectAction.Type;
+
+export const ProjectScript = Schema.Union([ShellProjectAction, AgentProjectAction]);
 export type ProjectScript = typeof ProjectScript.Type;
 
 export const OrchestrationProject = Schema.Struct({

@@ -103,6 +103,7 @@ describe("ProjectSetupScriptRunner", () => {
                   Effect.succeed(
                     emptySnapshot([
                       {
+                        kind: "shell",
                         id: "setup",
                         name: "Setup",
                         command: "bun install",

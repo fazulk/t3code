@@ -335,6 +335,80 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
+  it.effect("opens shell terminals by default when launch is omitted", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        shellResolver: () => "/bin/zsh",
+      });
+
+      yield* manager.open(openInput());
+
+      expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+        shell: "/bin/zsh",
+      });
+    }),
+  );
+
+  it.effect("opens direct process launches without going through the login shell", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        shellResolver: () => "/bin/zsh",
+      });
+
+      yield* manager.open(
+        openInput({
+          terminalId: "agent-1",
+          launch: {
+            kind: "process",
+            executable: "/opt/codex",
+            args: ["-m", "gpt-5.4", "Review this repo"],
+          },
+        }),
+      );
+
+      expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+        shell: "/opt/codex",
+        args: ["-m", "gpt-5.4", "Review this repo"],
+      });
+    }),
+  );
+
+  it.effect("preserves an existing process launch when reopening without an explicit launch", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        shellResolver: () => "/bin/zsh",
+      });
+
+      yield* manager.open(
+        openInput({
+          terminalId: "agent-1",
+          launch: {
+            kind: "process",
+            executable: "/opt/codex",
+            args: ["-m", "gpt-5.4", "Review this repo"],
+          },
+        }),
+      );
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      const reopened = yield* manager.open(
+        openInput({
+          terminalId: "agent-1",
+        }),
+      );
+
+      assert.equal(reopened.status, "running");
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+      expect(process.killed).toBe(false);
+      expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+        shell: "/opt/codex",
+        args: ["-m", "gpt-5.4", "Review this repo"],
+      });
+    }),
+  );
+
   it.effect("forwards write and resize to active pty process", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();
@@ -587,6 +661,125 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
         "1200 millis",
       );
     }),
+  );
+
+  it.effect("marks direct process launches busy for their full lifetime and clears on exit", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, getEvents } = yield* createManager(5, {
+        subprocessChecker: () => Effect.succeed(false),
+        subprocessPollIntervalMs: 20,
+      });
+
+      yield* manager.open(
+        openInput({
+          terminalId: "agent-1",
+          launch: {
+            kind: "process",
+            executable: "/opt/claude",
+            args: ["--model", "claude-sonnet-4-6", "Review this repo"],
+          },
+        }),
+      );
+
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some(
+            (event) =>
+              event.type === "activity" &&
+              event.terminalId === "agent-1" &&
+              event.hasRunningSubprocess === true,
+          ),
+        ),
+      );
+
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+      process.emitExit({ exitCode: 0, signal: 0 });
+
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some((event) => event.type === "exited" && event.terminalId === "agent-1"),
+        ),
+      );
+
+      const events = yield* getEvents;
+      expect(
+        events.some(
+          (event) =>
+            event.type === "activity" &&
+            event.terminalId === "agent-1" &&
+            event.hasRunningSubprocess === true,
+        ),
+      ).toBe(true);
+    }),
+  );
+
+  it.effect("preserves launch mode when restarting a direct process session", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      const launch = {
+        kind: "process" as const,
+        executable: "/opt/codex",
+        args: ["-m", "gpt-5.4", "Review this repo"],
+      };
+
+      yield* manager.open(
+        openInput({
+          terminalId: "agent-1",
+          launch,
+        }),
+      );
+
+      yield* manager.restart(
+        restartInput({
+          terminalId: "agent-1",
+          launch,
+        }),
+      );
+
+      expect(ptyAdapter.spawnInputs).toHaveLength(2);
+      expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+        shell: "/opt/codex",
+        args: ["-m", "gpt-5.4", "Review this repo"],
+      });
+      expect(ptyAdapter.spawnInputs[1]).toMatchObject({
+        shell: "/opt/codex",
+        args: ["-m", "gpt-5.4", "Review this repo"],
+      });
+    }),
+  );
+
+  it.effect(
+    "preserves the existing process launch when restarting without an explicit launch",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager();
+        const launch = {
+          kind: "process" as const,
+          executable: "/opt/codex",
+          args: ["-m", "gpt-5.4", "Review this repo"],
+        };
+
+        yield* manager.open(
+          openInput({
+            terminalId: "agent-1",
+            launch,
+          }),
+        );
+
+        yield* manager.restart(
+          restartInput({
+            terminalId: "agent-1",
+          }),
+        );
+
+        expect(ptyAdapter.spawnInputs).toHaveLength(2);
+        expect(ptyAdapter.spawnInputs[1]).toMatchObject({
+          shell: "/opt/codex",
+          args: ["-m", "gpt-5.4", "Review this repo"],
+        });
+      }),
   );
 
   it.effect("does not invoke subprocess polling until a terminal session is running", () =>
