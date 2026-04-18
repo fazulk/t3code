@@ -3,10 +3,12 @@ import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 
 import {
+  GLOBAL_ACTION_RUN_COMMAND_PATTERN,
   KeybindingsConfig,
   KeybindingRule,
   ResolvedKeybindingRule,
   ResolvedKeybindingsConfig,
+  SCRIPT_RUN_COMMAND_PATTERN,
 } from "./keybindings.ts";
 
 const decode = <S extends Schema.Top>(
@@ -92,6 +94,30 @@ it.effect("accepts dynamic script run commands", () =>
       command: "script.setup.run",
     });
     assert.strictEqual(parsed.command, "script.setup.run");
+  }),
+);
+
+it.effect("accepts global action run commands", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decode(KeybindingRule, {
+      key: "mod+g",
+      command: "global-action.setup.run",
+    });
+    assert.strictEqual(parsed.command, "global-action.setup.run");
+  }),
+);
+
+it.effect("exposes command patterns for project and global actions", () =>
+  Effect.sync(() => {
+    assert.strictEqual(Schema.is(SCRIPT_RUN_COMMAND_PATTERN)("script.lint.run"), true);
+    assert.strictEqual(
+      Schema.is(GLOBAL_ACTION_RUN_COMMAND_PATTERN)("global-action.review.run"),
+      true,
+    );
+    assert.strictEqual(
+      Schema.is(GLOBAL_ACTION_RUN_COMMAND_PATTERN)("global-action.BAD.run"),
+      false,
+    );
   }),
 );
 

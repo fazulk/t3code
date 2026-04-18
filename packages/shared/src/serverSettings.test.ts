@@ -8,6 +8,10 @@ import {
 } from "./serverSettings.ts";
 
 describe("serverSettings helpers", () => {
+  it("defaults global actions when omitted from persisted settings", () => {
+    expect(DEFAULT_SERVER_SETTINGS.globalActions).toEqual([]);
+  });
+
   it("normalizes optional persisted strings", () => {
     expect(normalizePersistedServerSettingString(undefined)).toBeUndefined();
     expect(normalizePersistedServerSettingString("   ")).toBeUndefined();
@@ -134,5 +138,59 @@ describe("serverSettings helpers", () => {
       provider: "opencode",
       model: "openai/gpt-5",
     });
+  });
+
+  it("replaces global actions when provided in a patch", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      globalActions: [
+        {
+          kind: "shell" as const,
+          id: "lint",
+          name: "Lint",
+          command: "bun lint",
+          icon: "lint" as const,
+          runOnWorktreeCreate: false,
+        },
+      ],
+    };
+
+    expect(
+      applyServerSettingsPatch(current, {
+        globalActions: [
+          {
+            kind: "agent",
+            id: "review",
+            name: "Review",
+            icon: "agent",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+            prompt: "Review the current branch.",
+            submitPromptOnLaunch: true,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            runOnWorktreeCreate: false,
+          },
+        ],
+      }).globalActions,
+    ).toEqual([
+      {
+        kind: "agent",
+        id: "review",
+        name: "Review",
+        icon: "agent",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
+        prompt: "Review the current branch.",
+        submitPromptOnLaunch: true,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        runOnWorktreeCreate: false,
+      },
+    ]);
   });
 });

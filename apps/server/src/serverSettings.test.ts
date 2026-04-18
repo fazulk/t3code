@@ -27,6 +27,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       assert.deepEqual(
         decodePatch({
+          globalActions: [
+            {
+              kind: "shell",
+              id: "lint",
+              name: "Lint",
+              command: "bun lint",
+              icon: "lint",
+              runOnWorktreeCreate: false,
+            },
+          ],
           textGenerationModelSelection: {
             options: {
               fastMode: false,
@@ -34,6 +44,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
         }),
         {
+          globalActions: [
+            {
+              kind: "shell",
+              id: "lint",
+              name: "Lint",
+              command: "bun lint",
+              icon: "lint",
+              runOnWorktreeCreate: false,
+            },
+          ],
           textGenerationModelSelection: {
             options: {
               fastMode: false,
@@ -59,6 +79,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             customModels: ["claude-custom"],
           },
         },
+        globalActions: [
+          {
+            kind: "shell",
+            id: "lint",
+            name: "Lint",
+            command: "bun lint",
+            icon: "lint",
+            runOnWorktreeCreate: false,
+          },
+        ],
         textGenerationModelSelection: {
           provider: "codex",
           model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
@@ -94,6 +124,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: ["claude-custom"],
         launchArgs: "",
       });
+      assert.deepEqual(next.globalActions, [
+        {
+          kind: "shell",
+          id: "lint",
+          name: "Lint",
+          command: "bun lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ]);
       assert.deepEqual(next.textGenerationModelSelection, {
         provider: "codex",
         model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,

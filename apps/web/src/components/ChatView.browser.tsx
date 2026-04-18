@@ -947,6 +947,20 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
+  if (tag === WS_METHODS.serverUpdateSettings) {
+    const patch =
+      typeof body === "object" && body !== null && "patch" in body
+        ? (body.patch as { globalActions?: ServerConfig["settings"]["globalActions"] })
+        : {};
+    fixture.serverConfig = {
+      ...fixture.serverConfig,
+      settings: {
+        ...fixture.serverConfig.settings,
+        ...(patch.globalActions ? { globalActions: patch.globalActions } : {}),
+      },
+    };
+    return fixture.serverConfig.settings;
+  }
   if (tag === WS_METHODS.gitListBranches) {
     return {
       isRepo: true,
@@ -2272,6 +2286,258 @@ describe("ChatView timeline estimator parity (full app)", () => {
               T3CODE_WORKTREE_PATH: "/repo/worktrees/feature-draft",
             },
           });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("saves global shell actions through server settings instead of project metadata", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-global-action-save" as MessageId,
+        targetText: "global action save",
+      }),
+    });
+
+    try {
+      const initialSettingsUpdates = wsRequests.filter(
+        (request) => request._tag === WS_METHODS.serverUpdateSettings,
+      ).length;
+      const initialProjectMetaUpdates = wsRequests.filter(
+        (request) =>
+          request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+          request.type === "project.meta.update",
+      ).length;
+
+      await page.getByRole("button", { name: "Add action" }).click();
+      await page.getByLabelText("Name").fill("Shared Lint");
+      await page.getByLabelText("Global").click();
+      await page.getByLabelText("Command").fill("bun lint");
+      await page.getByRole("button", { name: "Save action" }).click();
+
+      await vi.waitFor(
+        () => {
+          const settingsUpdates = wsRequests.filter(
+            (request) => request._tag === WS_METHODS.serverUpdateSettings,
+          );
+          expect(settingsUpdates).toHaveLength(initialSettingsUpdates + 1);
+          expect(settingsUpdates.at(-1)).toMatchObject({
+            _tag: WS_METHODS.serverUpdateSettings,
+            patch: {
+              globalActions: [
+                {
+                  kind: "shell",
+                  name: "Shared Lint",
+                  command: "bun lint",
+                },
+              ],
+            },
+          });
+          const projectMetaUpdates = wsRequests.filter(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "project.meta.update",
+          );
+          expect(projectMetaUpdates).toHaveLength(initialProjectMetaUpdates);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs global shell actions with the same terminal path as local actions", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-global-shell-run" as MessageId,
+        targetText: "global shell action",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            globalActions: [
+              {
+                kind: "shell",
+                id: "shared-lint",
+                name: "Shared Lint",
+                command: "bun lint",
+                icon: "lint",
+                runOnWorktreeCreate: false,
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    try {
+      const runButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Shared Lint",
+          ) as HTMLButtonElement | null,
+        "Unable to find Run Shared Lint button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalOpen,
+          );
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            threadId: THREAD_ID,
+            cwd: "/repo/project",
+            env: {
+              T3CODE_PROJECT_ROOT: "/repo/project",
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          const writeRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalWrite,
+          );
+          expect(writeRequest).toMatchObject({
+            _tag: WS_METHODS.terminalWrite,
+            threadId: THREAD_ID,
+            data: "bun lint\r",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps last-used primary actions scoped to the active project", async () => {
+    const snapshot = createSnapshotWithSecondaryProject();
+    const projects = snapshot.projects.slice();
+    for (let index = 0; index < projects.length; index += 1) {
+      const project = projects[index];
+      if (!project) continue;
+      if (project.id === PROJECT_ID) {
+        projects[index] = Object.assign({}, project, {
+          scripts: [
+            {
+              kind: "shell" as const,
+              id: "lint",
+              name: "Lint",
+              command: "bun lint",
+              icon: "lint" as const,
+              runOnWorktreeCreate: false,
+            },
+          ],
+        });
+        continue;
+      }
+      if (project.id === SECOND_PROJECT_ID) {
+        projects[index] = Object.assign({}, project, {
+          scripts: [
+            {
+              kind: "shell" as const,
+              id: "docs-lint",
+              name: "Docs Lint",
+              command: "bun lint:docs",
+              icon: "lint" as const,
+              runOnWorktreeCreate: false,
+            },
+          ],
+        });
+      }
+    }
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: Object.assign({}, snapshot, { projects }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            globalActions: [
+              {
+                kind: "shell",
+                id: "shared-review",
+                name: "Shared Review",
+                command: "echo review",
+                icon: "play",
+                runOnWorktreeCreate: false,
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    try {
+      const currentPrimary = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Lint",
+          ) as HTMLButtonElement | null,
+        "Expected the first project's local action to be primary.",
+      );
+      expect(currentPrimary.title).toBe("Run Lint");
+
+      await page.getByRole("button", { name: "Actions" }).click();
+      await page.getByText("Shared Review", { exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          const primary = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Shared Review",
+          ) as HTMLButtonElement | null;
+          expect(primary).not.toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await mounted.router.navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          threadId: "thread-secondary-project" as ThreadId,
+        },
+      });
+
+      await vi.waitFor(
+        () => {
+          const primary = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Docs Lint",
+          ) as HTMLButtonElement | null;
+          expect(primary).not.toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await mounted.router.navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          threadId: THREAD_ID,
+        },
+      });
+
+      await vi.waitFor(
+        () => {
+          const primary = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Shared Review",
+          ) as HTMLButtonElement | null;
+          expect(primary).not.toBeNull();
         },
         { timeout: 8_000, interval: 16 },
       );

@@ -109,12 +109,16 @@ import { ChevronDownIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
-import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
+  actionPreferenceKey,
+  commandForGlobalAction,
   commandForProjectScript,
-  nextProjectScriptId,
+  globalActionIdFromCommand,
+  nextResolvedActionId,
   projectScriptIdFromCommand,
+  type ActionScope,
 } from "~/projectScripts";
+import { type SaveScopedActionInput, type ScopedAction } from "./ProjectScriptsControl";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
@@ -188,6 +192,7 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const EMPTY_ACTIONS: readonly ProjectScript[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
@@ -711,7 +716,7 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
-  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
+  const [lastInvokedActionKeyByProjectId, setLastInvokedActionKeyByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
     LastInvokedScriptByProjectSchema,
@@ -1057,6 +1062,7 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId && activeThread?.environmentId === primaryEnvironmentId
       ? primaryServerConfig
       : (activeEnvRuntimeState?.serverConfig ?? primaryServerConfig);
+  const globalActions = serverConfig?.settings.globalActions ?? EMPTY_ACTIONS;
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
@@ -1637,9 +1643,95 @@ export default function ChatView(props: ChatViewProps) {
       terminalState.terminalIds.length,
     ],
   );
-  const runProjectScript = useCallback(
+  const buildPersistedAction = useCallback(
+    (actionId: string, scope: ActionScope, input: SaveScopedActionInput["value"]): ProjectScript =>
+      input.kind === "agent"
+        ? {
+            kind: "agent",
+            id: actionId,
+            name: input.name,
+            icon: input.icon,
+            modelSelection: input.modelSelection,
+            prompt: input.prompt,
+            submitPromptOnLaunch: input.submitPromptOnLaunch,
+            runtimeMode: input.runtimeMode,
+            interactionMode: input.interactionMode,
+            runOnWorktreeCreate: false,
+          }
+        : {
+            kind: "shell",
+            id: actionId,
+            name: input.name,
+            command: input.command,
+            icon: input.icon,
+            runOnWorktreeCreate: scope === "project" ? input.runOnWorktreeCreate : false,
+          },
+    [],
+  );
+  const upsertProjectActions = useCallback(
+    (
+      scripts: ProjectScript[],
+      actionId: string | null,
+      nextAction: ProjectScript,
+    ): ProjectScript[] => {
+      const baseScripts =
+        actionId === null
+          ? [...scripts, nextAction]
+          : scripts.map((script) => (script.id === actionId ? nextAction : script));
+      if (!(isShellProjectScript(nextAction) && nextAction.runOnWorktreeCreate)) {
+        return baseScripts;
+      }
+      return baseScripts.map((script) =>
+        script.id === nextAction.id
+          ? script
+          : isShellProjectScript(script) && script.runOnWorktreeCreate
+            ? Object.assign({}, script, { runOnWorktreeCreate: false })
+            : script,
+      );
+    },
+    [],
+  );
+  const persistProjectScripts = useCallback(
+    async (projectId: ProjectId, nextScripts: ProjectScript[]) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
+
+      await api.orchestration.dispatchCommand({
+        type: "project.meta.update",
+        commandId: newCommandId(),
+        projectId,
+        scripts: nextScripts,
+      });
+    },
+    [environmentId],
+  );
+  const persistGlobalActions = useCallback(async (nextGlobalActions: readonly ProjectScript[]) => {
+    const localApi = readLocalApi();
+    if (!localApi) {
+      throw new Error("Local API unavailable.");
+    }
+    await localApi.server.updateSettings({ globalActions: nextGlobalActions });
+  }, []);
+  const persistActionKeybinding = useCallback(
+    async (input: { keybinding?: string | null; command: KeybindingCommand }) => {
+      const keybindingRule = decodeProjectScriptKeybindingRule({
+        keybinding: input.keybinding,
+        command: input.command,
+      });
+
+      if (isElectron && keybindingRule) {
+        const localApi = readLocalApi();
+        if (!localApi) {
+          throw new Error("Local API unavailable.");
+        }
+        await localApi.server.upsertKeybinding(keybindingRule);
+      }
+    },
+    [],
+  );
+  const runAction = useCallback(
     async (
-      script: ProjectScript,
+      scopedAction: ScopedAction,
       options?: {
         cwd?: string;
         env?: Record<string, string>;
@@ -1648,6 +1740,7 @@ export default function ChatView(props: ChatViewProps) {
         rememberAsLastInvoked?: boolean;
       },
     ) => {
+      const script = scopedAction.action;
       const api = readEnvironmentApi(environmentId);
       if (!api || !activeThreadId || !activeProject || !activeThread) return;
       if (isAgentProjectScript(script) && !serverConfig) {
@@ -1655,9 +1748,10 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       if (options?.rememberAsLastInvoked !== false) {
-        setLastInvokedScriptByProjectId((current) => {
-          if (current[activeProject.id] === script.id) return current;
-          return { ...current, [activeProject.id]: script.id };
+        const nextActionKey = actionPreferenceKey(scopedAction.scope, script.id);
+        setLastInvokedActionKeyByProjectId((current) => {
+          if (current[activeProject.id] === nextActionKey) return current;
+          return { ...current, [activeProject.id]: nextActionKey };
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
@@ -1767,7 +1861,7 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
       storeNewTerminal,
       storeSetActiveTerminal,
-      setLastInvokedScriptByProjectId,
+      setLastInvokedActionKeyByProjectId,
       environmentId,
       serverConfig,
       terminalState.activeTerminalId,
@@ -1775,161 +1869,119 @@ export default function ChatView(props: ChatViewProps) {
       terminalState.terminalIds,
     ],
   );
+  const saveAction = useCallback(
+    async (input: SaveScopedActionInput) => {
+      if (!activeProject) return;
 
-  const persistProjectScripts = useCallback(
-    async (input: {
-      projectId: ProjectId;
-      projectCwd: string;
-      previousScripts: ProjectScript[];
-      nextScripts: ProjectScript[];
-      keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
-    }) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api) return;
-
-      await api.orchestration.dispatchCommand({
-        type: "project.meta.update",
-        commandId: newCommandId(),
-        projectId: input.projectId,
-        scripts: input.nextScripts,
+      const nextActionId = nextResolvedActionId({
+        name: input.value.name,
+        scope: input.scope,
+        projectScripts: activeProject.scripts,
+        globalActions,
+        previousAction: input.previousAction,
       });
+      const nextAction = buildPersistedAction(nextActionId, input.scope, input.value);
+      const previousActionKey = input.previousAction
+        ? actionPreferenceKey(input.previousAction.scope, input.previousAction.action.id)
+        : null;
+      const nextActionKey = actionPreferenceKey(input.scope, nextActionId);
+      const projectActionsChanged =
+        input.scope === "project" || input.previousAction?.scope === "project";
+      const globalActionsChanged =
+        input.scope === "global" || input.previousAction?.scope === "global";
 
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding: input.keybinding,
-        command: input.keybindingCommand,
-      });
+      let nextProjectScripts = activeProject.scripts;
+      let nextGlobalActions = globalActions;
 
-      if (isElectron && keybindingRule) {
-        const localApi = readLocalApi();
-        if (!localApi) {
-          throw new Error("Local API unavailable.");
+      if (!input.previousAction) {
+        if (input.scope === "project") {
+          nextProjectScripts = upsertProjectActions(nextProjectScripts, null, nextAction);
+        } else {
+          nextGlobalActions = [...nextGlobalActions, nextAction];
         }
-        await localApi.server.upsertKeybinding(keybindingRule);
-      }
-    },
-    [environmentId],
-  );
-  const saveProjectScript = useCallback(
-    async (input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const nextId = nextProjectScriptId(
-        input.name,
-        activeProject.scripts.map((script) => script.id),
-      );
-      const nextScript: ProjectScript =
-        input.kind === "agent"
-          ? {
-              kind: "agent",
-              id: nextId,
-              name: input.name,
-              icon: input.icon,
-              modelSelection: input.modelSelection,
-              prompt: input.prompt,
-              submitPromptOnLaunch: input.submitPromptOnLaunch,
-              runtimeMode: input.runtimeMode,
-              interactionMode: input.interactionMode,
-              runOnWorktreeCreate: false,
-            }
-          : {
-              kind: "shell",
-              id: nextId,
-              name: input.name,
-              command: input.command,
-              icon: input.icon,
-              runOnWorktreeCreate: input.runOnWorktreeCreate,
-            };
-      const nextScripts =
-        input.kind === "shell" && input.runOnWorktreeCreate
-          ? [
-              ...activeProject.scripts.map((script) =>
-                isShellProjectScript(script) && script.runOnWorktreeCreate
-                  ? { ...script, runOnWorktreeCreate: false }
-                  : script,
-              ),
-              nextScript,
-            ]
-          : [...activeProject.scripts, nextScript];
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(nextId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const updateProjectScript = useCallback(
-    async (scriptId: string, input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
-      if (!existingScript) {
-        throw new Error("Script not found.");
+      } else {
+        if (input.previousAction.scope === input.scope) {
+          if (input.scope === "project") {
+            nextProjectScripts = upsertProjectActions(
+              nextProjectScripts,
+              input.previousAction.action.id,
+              nextAction,
+            );
+          } else {
+            nextGlobalActions = nextGlobalActions.map((action) =>
+              action.id === input.previousAction?.action.id ? nextAction : action,
+            );
+          }
+        } else {
+          if (input.previousAction.scope === "project") {
+            nextProjectScripts = nextProjectScripts.filter(
+              (script) => script.id !== input.previousAction?.action.id,
+            );
+            nextGlobalActions = [...nextGlobalActions, nextAction];
+          } else {
+            nextGlobalActions = nextGlobalActions.filter(
+              (action) => action.id !== input.previousAction?.action.id,
+            );
+            nextProjectScripts = upsertProjectActions(nextProjectScripts, null, nextAction);
+          }
+        }
       }
 
-      const updatedScript: ProjectScript =
-        input.kind === "agent"
-          ? {
-              kind: "agent",
-              id: existingScript.id,
-              name: input.name,
-              icon: input.icon,
-              modelSelection: input.modelSelection,
-              prompt: input.prompt,
-              submitPromptOnLaunch: input.submitPromptOnLaunch,
-              runtimeMode: input.runtimeMode,
-              interactionMode: input.interactionMode,
-              runOnWorktreeCreate: false,
-            }
-          : {
-              kind: "shell",
-              id: existingScript.id,
-              name: input.name,
-              command: input.command,
-              icon: input.icon,
-              runOnWorktreeCreate: input.runOnWorktreeCreate,
-            };
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.kind === "shell" && input.runOnWorktreeCreate && isShellProjectScript(script)
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
-      );
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(scriptId),
+      await Promise.all([
+        ...(projectActionsChanged
+          ? [persistProjectScripts(activeProject.id, nextProjectScripts)]
+          : []),
+        ...(globalActionsChanged ? [persistGlobalActions(nextGlobalActions)] : []),
+      ]);
+      await persistActionKeybinding({
+        keybinding: input.value.keybinding,
+        command:
+          input.scope === "global"
+            ? commandForGlobalAction(nextActionId)
+            : commandForProjectScript(nextActionId),
       });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const deleteProjectScript = useCallback(
-    async (scriptId: string) => {
-      if (!activeProject) return;
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
 
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+      if (previousActionKey) {
+        setLastInvokedActionKeyByProjectId((current) => {
+          if (current[activeProject.id] !== previousActionKey) return current;
+          return { ...current, [activeProject.id]: nextActionKey };
+        });
+      }
+    },
+    [
+      activeProject,
+      buildPersistedAction,
+      globalActions,
+      persistActionKeybinding,
+      persistGlobalActions,
+      persistProjectScripts,
+      setLastInvokedActionKeyByProjectId,
+      upsertProjectActions,
+    ],
+  );
+  const deleteAction = useCallback(
+    async (scopedAction: ScopedAction) => {
+      if (!activeProject) return;
+
+      const deletedName = scopedAction.action.name;
+      const nextProjectScripts =
+        scopedAction.scope === "project"
+          ? activeProject.scripts.filter((script) => script.id !== scopedAction.action.id)
+          : activeProject.scripts;
+      const nextGlobalActions =
+        scopedAction.scope === "global"
+          ? globalActions.filter((action) => action.id !== scopedAction.action.id)
+          : globalActions;
 
       try {
-        await persistProjectScripts({
-          projectId: activeProject.id,
-          projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
-          nextScripts,
-          keybinding: null,
-          keybindingCommand: commandForProjectScript(scriptId),
-        });
+        await Promise.all(
+          scopedAction.scope === "project"
+            ? [persistProjectScripts(activeProject.id, nextProjectScripts)]
+            : [persistGlobalActions(nextGlobalActions)],
+        );
         toastManager.add({
           type: "success",
-          title: `Deleted action "${deletedName ?? "Unknown"}"`,
+          title: `Deleted action "${deletedName}"`,
         });
       } catch (error) {
         toastManager.add({
@@ -1939,7 +1991,7 @@ export default function ChatView(props: ChatViewProps) {
         });
       }
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, globalActions, persistGlobalActions, persistProjectScripts],
   );
 
   const handleRuntimeModeChange = useCallback(
@@ -2367,13 +2419,23 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      const globalActionId = globalActionIdFromCommand(command);
+      if (globalActionId && activeProject) {
+        const globalAction = globalActions.find((entry) => entry.id === globalActionId);
+        if (!globalAction) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void runAction({ scope: "global", action: globalAction });
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
       event.stopPropagation();
-      void runProjectScript(script);
+      void runAction({ scope: "project", action: script });
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
@@ -2385,11 +2447,12 @@ export default function ChatView(props: ChatViewProps) {
     closeTerminal,
     createNewTerminal,
     setTerminalOpen,
-    runProjectScript,
+    runAction,
     splitTerminal,
     keybindings,
     onToggleDiff,
     toggleTerminalVisibility,
+    globalActions,
   ]);
 
   const onRevertToTurnCount = useCallback(
@@ -3311,9 +3374,10 @@ export default function ChatView(props: ChatViewProps) {
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
           activeProjectScripts={activeProject?.scripts}
+          globalActions={globalActions}
           providers={providerStatuses}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+          preferredActionKey={
+            activeProject ? (lastInvokedActionKeyByProjectId[activeProject.id] ?? null) : null
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
@@ -3323,10 +3387,9 @@ export default function ChatView(props: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
-          onRunProjectScript={runProjectScript}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
+          onRunAction={runAction}
+          onSaveAction={saveAction}
+          onDeleteAction={deleteAction}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />

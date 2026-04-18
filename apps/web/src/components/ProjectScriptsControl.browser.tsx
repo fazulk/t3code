@@ -65,28 +65,36 @@ async function chooseAgentIcon(): Promise<void> {
   await page.getByText("Agent", { exact: true }).click();
 }
 
+async function openActionsMenu(): Promise<void> {
+  await page.getByRole("button", { name: "Actions" }).click();
+}
+
 async function mountControl(options?: {
-  scripts?: ProjectScript[];
+  projectScripts?: ProjectScript[];
+  globalActions?: ProjectScript[];
   providers?: ReadonlyArray<ServerProvider>;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
-  const onAddScript = vi.fn();
+  const onSaveAction = vi.fn();
+  const onDeleteAction = vi.fn();
+
   const screen = await render(
     <ProjectScriptsControl
-      scripts={options?.scripts ?? []}
+      projectScripts={options?.projectScripts ?? []}
+      globalActions={options?.globalActions ?? []}
       keybindings={[]}
       providers={options?.providers ?? TEST_PROVIDERS}
-      onRunScript={() => undefined}
-      onAddScript={onAddScript}
-      onUpdateScript={() => undefined}
-      onDeleteScript={() => undefined}
+      onRunAction={() => undefined}
+      onSaveAction={onSaveAction}
+      onDeleteAction={onDeleteAction}
     />,
     { container: host },
   );
 
   return {
-    onAddScript,
+    onSaveAction,
+    onDeleteAction,
     cleanup: async () => {
       await screen.unmount();
       host.remove();
@@ -99,7 +107,7 @@ describe("ProjectScriptsControl", () => {
     document.body.innerHTML = "";
   });
 
-  it("adds command actions with the existing shell payload", async () => {
+  it("adds local shell actions through the project scope", async () => {
     const mounted = await mountControl();
 
     try {
@@ -109,14 +117,195 @@ describe("ProjectScriptsControl", () => {
       await page.getByRole("button", { name: "Save action" }).click();
 
       await vi.waitFor(() => {
-        expect(mounted.onAddScript).toHaveBeenCalledWith({
+        expect(mounted.onSaveAction).toHaveBeenCalledWith({
+          scope: "project",
+          previousAction: null,
+          value: {
+            kind: "shell",
+            name: "Lint",
+            command: "bun run lint",
+            icon: "play",
+            runOnWorktreeCreate: false,
+            keybinding: null,
+          },
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("adds global shell actions through server-backed scope", async () => {
+    const mounted = await mountControl();
+
+    try {
+      await page.getByRole("button", { name: "Add action" }).click();
+      await page.getByLabelText("Name").fill("Shared Lint");
+      await page.getByLabelText("Global").click();
+      await page.getByLabelText("Command").fill("bun lint");
+      await page.getByRole("button", { name: "Save action" }).click();
+
+      await vi.waitFor(() => {
+        expect(mounted.onSaveAction).toHaveBeenCalledWith({
+          scope: "global",
+          previousAction: null,
+          value: {
+            kind: "shell",
+            name: "Shared Lint",
+            command: "bun lint",
+            icon: "play",
+            runOnWorktreeCreate: false,
+            keybinding: null,
+          },
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("adds global agent actions with the selected model selection and prompt", async () => {
+    const mounted = await mountControl();
+
+    try {
+      await page.getByRole("button", { name: "Add action" }).click();
+      await chooseAgentIcon();
+      await page.getByLabelText("Name").fill("Review");
+      await page.getByLabelText("Global").click();
+      await page
+        .getByRole("textbox", { name: "Description", exact: true })
+        .fill("Review the current branch.");
+      await page.getByRole("button", { name: "Save action" }).click();
+
+      await vi.waitFor(() => {
+        expect(mounted.onSaveAction).toHaveBeenCalledWith({
+          scope: "global",
+          previousAction: null,
+          value: {
+            kind: "agent",
+            name: "Review",
+            icon: "agent",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+              options: {
+                reasoningEffort: "medium",
+              },
+            },
+            prompt: "Review the current branch.",
+            submitPromptOnLaunch: true,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            keybinding: null,
+          },
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the Global checkbox checked when editing a global action", async () => {
+    const mounted = await mountControl({
+      globalActions: [
+        {
           kind: "shell",
+          id: "shared-lint",
+          name: "Shared Lint",
+          command: "bun lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ],
+    });
+
+    try {
+      await openActionsMenu();
+      await page.getByRole("button", { name: "Edit Shared Lint" }).click();
+
+      await vi.waitFor(() => {
+        expect(page.getByLabelText("Global")).toBeChecked();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders local actions first, then a separator, then global actions, with Add action last", async () => {
+    const mounted = await mountControl({
+      projectScripts: [
+        {
+          kind: "shell",
+          id: "lint",
           name: "Lint",
-          command: "bun run lint",
+          command: "bun lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ],
+      globalActions: [
+        {
+          kind: "shell",
+          id: "shared-review",
+          name: "Shared Review",
+          command: "echo review",
           icon: "play",
           runOnWorktreeCreate: false,
-          keybinding: null,
-        });
+        },
+      ],
+    });
+
+    try {
+      await openActionsMenu();
+
+      const itemTexts = Array.from(document.querySelectorAll('[role="menuitem"]')).map((node) =>
+        node.textContent?.replace(/\s+/g, " ").trim(),
+      );
+      expect(itemTexts).toEqual(["Lint", "Shared Review", "Add action"]);
+      expect(document.querySelectorAll('[role="separator"]').length).toBe(1);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the edit dialog for both local and global actions", async () => {
+    const mounted = await mountControl({
+      projectScripts: [
+        {
+          kind: "shell",
+          id: "lint",
+          name: "Lint",
+          command: "bun lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ],
+      globalActions: [
+        {
+          kind: "shell",
+          id: "shared-lint",
+          name: "Shared Lint",
+          command: "bun lint --all",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ],
+    });
+
+    try {
+      await openActionsMenu();
+      await page.getByRole("button", { name: "Edit Lint" }).click();
+      await vi.waitFor(() => {
+        expect(page.getByLabelText("Name")).toHaveValue("Lint");
+        expect(page.getByLabelText("Global")).not.toBeChecked();
+      });
+      await page.getByRole("button", { name: "Cancel" }).click();
+
+      await openActionsMenu();
+      await page.getByRole("button", { name: "Edit Shared Lint" }).click();
+      await vi.waitFor(() => {
+        expect(page.getByLabelText("Name")).toHaveValue("Shared Lint");
+        expect(page.getByLabelText("Global")).toBeChecked();
       });
     } finally {
       await mounted.cleanup();
@@ -131,7 +320,6 @@ describe("ProjectScriptsControl", () => {
       await chooseAgentIcon();
 
       await vi.waitFor(() => {
-        expect(document.querySelector("#script-type")).toBeNull();
         expect(document.querySelector("#script-command")).toBeNull();
         expect(document.querySelector("#script-prompt")).not.toBeNull();
         expect(document.body.textContent).toContain("Agent Settings");
@@ -141,42 +329,6 @@ describe("ProjectScriptsControl", () => {
         expect(document.body.textContent).toContain("manual only");
       });
       expect(document.body.textContent).not.toContain("Run automatically on worktree creation");
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("adds agent actions with the selected model selection and prompt", async () => {
-    const mounted = await mountControl();
-
-    try {
-      await page.getByRole("button", { name: "Add action" }).click();
-      await chooseAgentIcon();
-      await page.getByLabelText("Name").fill("Review");
-      await page
-        .getByRole("textbox", { name: "Description", exact: true })
-        .fill("Review the current branch.");
-      await page.getByRole("button", { name: "Save action" }).click();
-
-      await vi.waitFor(() => {
-        expect(mounted.onAddScript).toHaveBeenCalledWith({
-          kind: "agent",
-          name: "Review",
-          icon: "agent",
-          modelSelection: {
-            provider: "codex",
-            model: "gpt-5.4",
-            options: {
-              reasoningEffort: "medium",
-            },
-          },
-          prompt: "Review the current branch.",
-          submitPromptOnLaunch: true,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          keybinding: null,
-        });
-      });
     } finally {
       await mounted.cleanup();
     }
@@ -206,7 +358,7 @@ describe("ProjectScriptsControl", () => {
           "Select a ready provider before saving an agent action.",
         );
       });
-      expect(mounted.onAddScript).not.toHaveBeenCalled();
+      expect(mounted.onSaveAction).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }
@@ -226,22 +378,26 @@ describe("ProjectScriptsControl", () => {
       await page.getByRole("button", { name: "Save action" }).click();
 
       await vi.waitFor(() => {
-        expect(mounted.onAddScript).toHaveBeenCalledWith({
-          kind: "agent",
-          name: "Review",
-          icon: "agent",
-          modelSelection: {
-            provider: "codex",
-            model: "gpt-5.4",
-            options: {
-              reasoningEffort: "medium",
+        expect(mounted.onSaveAction).toHaveBeenCalledWith({
+          scope: "project",
+          previousAction: null,
+          value: {
+            kind: "agent",
+            name: "Review",
+            icon: "agent",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+              options: {
+                reasoningEffort: "medium",
+              },
             },
+            prompt: "Review the current branch.",
+            submitPromptOnLaunch: false,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            keybinding: null,
           },
-          prompt: "Review the current branch.",
-          submitPromptOnLaunch: false,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          keybinding: null,
         });
       });
     } finally {
