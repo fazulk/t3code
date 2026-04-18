@@ -13,7 +13,10 @@ import { type DraftId } from "~/composerDraftStore";
 import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import ProjectScriptsControl, {
+  type SaveScopedActionInput,
+  type ScopedAction,
+} from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
@@ -27,8 +30,9 @@ interface ChatHeaderProps {
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
+  globalActions: readonly ProjectScript[];
   providers?: ReadonlyArray<ServerProvider> | undefined;
-  preferredScriptId: string | null;
+  preferredActionKey: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   terminalAvailable: boolean;
@@ -37,10 +41,9 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
-  onRunProjectScript: (script: ProjectScript) => void;
-  onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
-  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
-  onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onRunAction: (action: ScopedAction) => void;
+  onSaveAction: (input: SaveScopedActionInput) => Promise<void>;
+  onDeleteAction: (action: ScopedAction) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
 }
@@ -54,8 +57,9 @@ export const ChatHeader = memo(function ChatHeader({
   isGitRepo,
   openInCwd,
   activeProjectScripts,
+  globalActions,
   providers,
-  preferredScriptId,
+  preferredActionKey,
   keybindings,
   availableEditors,
   terminalAvailable,
@@ -64,10 +68,9 @@ export const ChatHeader = memo(function ChatHeader({
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
-  onRunProjectScript,
-  onAddProjectScript,
-  onUpdateProjectScript,
-  onDeleteProjectScript,
+  onRunAction,
+  onSaveAction,
+  onDeleteAction,
   onToggleTerminal,
   onToggleDiff,
 }: ChatHeaderProps) {
@@ -95,14 +98,14 @@ export const ChatHeader = memo(function ChatHeader({
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {activeProjectScripts && (
           <ProjectScriptsControl
-            scripts={activeProjectScripts}
+            projectScripts={activeProjectScripts}
+            globalActions={globalActions}
             keybindings={keybindings}
             providers={providers}
-            preferredScriptId={preferredScriptId}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
+            preferredActionKey={preferredActionKey}
+            onRunAction={onRunAction}
+            onSaveAction={onSaveAction}
+            onDeleteAction={onDeleteAction}
           />
         )}
         {activeProjectName && (

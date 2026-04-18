@@ -1,7 +1,7 @@
 import { MAX_KEYBINDING_VALUE_LENGTH, type KeybindingCommand } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { commandForProjectScript } from "../projectScripts";
+import { commandForGlobalAction, commandForProjectScript } from "../projectScripts";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -46,6 +46,18 @@ describe("projectScriptKeybindings", () => {
         command: "script.BAD.run" as KeybindingCommand,
       }),
     ).toThrowError(PROJECT_SCRIPT_KEYBINDING_INVALID_MESSAGE);
+  });
+
+  it("accepts global action commands", () => {
+    const rule = decodeProjectScriptKeybindingRule({
+      keybinding: "mod+g",
+      command: commandForGlobalAction("review"),
+    });
+
+    expect(rule).toEqual({
+      key: "mod+g",
+      command: "global-action.review.run",
+    });
   });
 
   it("reads latest matching keybinding value for a command", () => {

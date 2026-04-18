@@ -37,9 +37,12 @@ import {
   decodeProjectScriptKeybindingRule,
 } from "~/lib/projectScriptKeybindings";
 import {
+  actionPreferenceKey,
+  commandForGlobalAction,
   commandForProjectScript,
-  nextProjectScriptId,
+  nextResolvedActionId,
   primaryProjectScript,
+  type ActionScope,
 } from "~/projectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { isMacPlatform } from "~/lib/utils";
@@ -73,7 +76,7 @@ import {
 import { Group, GroupSeparator } from "./ui/group";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "./ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Switch } from "./ui/switch";
@@ -155,15 +158,26 @@ export type NewAgentProjectScriptInput = ProjectScriptInputBase & {
 
 export type NewProjectScriptInput = NewShellProjectScriptInput | NewAgentProjectScriptInput;
 
+export interface ScopedAction {
+  scope: ActionScope;
+  action: ProjectScript;
+}
+
+export interface SaveScopedActionInput {
+  scope: ActionScope;
+  previousAction: ScopedAction | null;
+  value: NewProjectScriptInput;
+}
+
 interface ProjectScriptsControlProps {
-  scripts: ProjectScript[];
+  projectScripts: readonly ProjectScript[];
+  globalActions: readonly ProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   providers?: ReadonlyArray<ServerProvider> | undefined;
-  preferredScriptId?: string | null;
-  onRunScript: (script: ProjectScript) => void;
-  onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
-  onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
-  onDeleteScript: (scriptId: string) => Promise<void> | void;
+  preferredActionKey?: string | null;
+  onRunAction: (action: ScopedAction) => void;
+  onSaveAction: (input: SaveScopedActionInput) => Promise<void> | void;
+  onDeleteAction: (action: ScopedAction) => Promise<void> | void;
 }
 
 function normalizeShortcutKeyToken(key: string): string | null {
@@ -245,15 +259,26 @@ function defaultAgentSelection(providers: ReadonlyArray<ServerProvider>): {
   };
 }
 
+function commandForScopedAction(scope: ActionScope, actionId: string) {
+  return scope === "global" ? commandForGlobalAction(actionId) : commandForProjectScript(actionId);
+}
+
+function displayNameForAction(scope: ActionScope, action: ProjectScript): string {
+  if (scope === "project" && isShellProjectScript(action) && action.runOnWorktreeCreate) {
+    return `${action.name} (setup)`;
+  }
+  return action.name;
+}
+
 export default function ProjectScriptsControl({
-  scripts,
+  projectScripts,
+  globalActions,
   keybindings,
   providers = [],
-  preferredScriptId = null,
-  onRunScript,
-  onAddScript,
-  onUpdateScript,
-  onDeleteScript,
+  preferredActionKey = null,
+  onRunAction,
+  onSaveAction,
+  onDeleteAction,
 }: ProjectScriptsControlProps) {
   const addScriptFormId = React.useId();
   const defaultSelection = useMemo(() => defaultAgentSelection(providers), [providers]);
@@ -270,7 +295,21 @@ export default function ProjectScriptsControl({
     [providers],
   );
 
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const scopedProjectScripts = useMemo<ScopedAction[]>(
+    () => projectScripts.map((action) => ({ scope: "project" as const, action })),
+    [projectScripts],
+  );
+  const scopedGlobalActions = useMemo<ScopedAction[]>(
+    () => globalActions.map((action) => ({ scope: "global" as const, action })),
+    [globalActions],
+  );
+  const scopedActions = useMemo(
+    () => [...scopedProjectScripts, ...scopedGlobalActions],
+    [scopedGlobalActions, scopedProjectScripts],
+  );
+
+  const [editingAction, setEditingAction] = useState<ScopedAction | null>(null);
+  const [scope, setScope] = useState<ActionScope>("project");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
@@ -291,18 +330,11 @@ export default function ProjectScriptsControl({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  const primaryScript = useMemo(() => {
-    if (preferredScriptId) {
-      const preferred = scripts.find((script) => script.id === preferredScriptId);
-      if (preferred) return preferred;
-    }
-    return primaryProjectScript(scripts);
-  }, [preferredScriptId, scripts]);
-
-  const isEditing = editingScriptId !== null;
+  const isEditing = editingAction !== null;
+  const isAgentAction = icon === "agent";
+  const isGlobalScope = scope === "global";
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
-  const isAgentAction = icon === "agent";
   const selectedAgentModels = useMemo(
     () => getProviderModels(providers, agentProvider),
     [agentProvider, providers],
@@ -316,6 +348,31 @@ export default function ProjectScriptsControl({
     selectedAgentCapabilities.supportsThinkingToggle ||
     selectedAgentCapabilities.supportsFastMode ||
     selectedAgentCapabilities.contextWindowOptions.length > 1;
+
+  const primaryAction = useMemo(() => {
+    if (preferredActionKey) {
+      const preferred = scopedActions.find(
+        ({ scope, action }) => actionPreferenceKey(scope, action.id) === preferredActionKey,
+      );
+      if (preferred) {
+        return preferred;
+      }
+      const legacyProjectAction = scopedProjectScripts.find(
+        ({ action }) => action.id === preferredActionKey,
+      );
+      if (legacyProjectAction) {
+        return legacyProjectAction;
+      }
+    }
+
+    const primaryProjectAction = primaryProjectScript(projectScripts);
+    if (primaryProjectAction) {
+      return { scope: "project" as const, action: primaryProjectAction };
+    }
+
+    const primaryGlobalAction = globalActions[0];
+    return primaryGlobalAction ? { scope: "global" as const, action: primaryGlobalAction } : null;
+  }, [globalActions, preferredActionKey, projectScripts, scopedActions, scopedProjectScripts]);
 
   const selectScriptIcon = useCallback(
     (nextIcon: ProjectScriptIcon) => {
@@ -343,7 +400,8 @@ export default function ProjectScriptsControl({
   );
 
   const resetDialogState = useCallback(() => {
-    setEditingScriptId(null);
+    setEditingAction(null);
+    setScope("project");
     setName("");
     setCommand("");
     setPrompt("");
@@ -372,6 +430,62 @@ export default function ProjectScriptsControl({
     setKeybinding(next);
   };
 
+  const openAddDialog = useCallback(() => {
+    resetDialogState();
+    setDialogOpen(true);
+  }, [resetDialogState]);
+
+  const handleGlobalScopeChange = useCallback((checked: boolean) => {
+    setScope(checked ? "global" : "project");
+    if (checked) {
+      setRunOnWorktreeCreate(false);
+    }
+  }, []);
+
+  const openEditDialog = useCallback(
+    (nextAction: ScopedAction) => {
+      setEditingAction(nextAction);
+      setScope(nextAction.scope);
+      setName(nextAction.action.name);
+      setIcon(nextAction.action.icon);
+      setIconPickerOpen(false);
+      setKeybinding(
+        keybindingValueForCommand(
+          keybindings,
+          commandForScopedAction(nextAction.scope, nextAction.action.id),
+        ) ?? "",
+      );
+      setValidationError(null);
+
+      if (isAgentProjectScript(nextAction.action)) {
+        setCommand("");
+        setPrompt(nextAction.action.prompt);
+        setAgentProvider(nextAction.action.modelSelection.provider);
+        setAgentModel(nextAction.action.modelSelection.model);
+        setAgentModelOptions(nextAction.action.modelSelection.options);
+        setAgentInteractionMode(nextAction.action.interactionMode);
+        setAgentRuntimeMode(nextAction.action.runtimeMode);
+        setSubmitPromptOnLaunch(nextAction.action.submitPromptOnLaunch);
+        setRunOnWorktreeCreate(false);
+      } else {
+        setCommand(nextAction.action.command);
+        setPrompt("");
+        setAgentProvider(defaultSelection.provider);
+        setAgentModel(defaultSelection.model);
+        setAgentModelOptions(undefined);
+        setAgentInteractionMode("default");
+        setAgentRuntimeMode("full-access");
+        setSubmitPromptOnLaunch(true);
+        setRunOnWorktreeCreate(
+          nextAction.scope === "global" ? false : nextAction.action.runOnWorktreeCreate,
+        );
+      }
+
+      setDialogOpen(true);
+    },
+    [defaultSelection.model, defaultSelection.provider, keybindings],
+  );
+
   const submitAddScript = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
@@ -383,15 +497,16 @@ export default function ProjectScriptsControl({
     setValidationError(null);
 
     try {
-      const scriptIdForValidation =
-        editingScriptId ??
-        nextProjectScriptId(
-          trimmedName,
-          scripts.map((script) => script.id),
-        );
+      const nextActionId = nextResolvedActionId({
+        name: trimmedName,
+        scope,
+        projectScripts,
+        globalActions,
+        previousAction: editingAction,
+      });
       const keybindingRule = decodeProjectScriptKeybindingRule({
         keybinding,
-        command: commandForProjectScript(scriptIdForValidation),
+        command: commandForScopedAction(scope, nextActionId),
       });
 
       const payload: NewProjectScriptInput = isAgentAction
@@ -466,16 +581,16 @@ export default function ProjectScriptsControl({
               name: trimmedName,
               command: trimmedCommand,
               icon,
-              runOnWorktreeCreate,
+              runOnWorktreeCreate: isGlobalScope ? false : runOnWorktreeCreate,
               keybinding: keybindingRule?.key ?? null,
             };
           })();
 
-      if (editingScriptId) {
-        await onUpdateScript(editingScriptId, payload);
-      } else {
-        await onAddScript(payload);
-      }
+      await onSaveAction({
+        scope,
+        previousAction: editingAction,
+        value: payload,
+      });
       setDialogOpen(false);
       setIconPickerOpen(false);
     } catch (error) {
@@ -483,119 +598,85 @@ export default function ProjectScriptsControl({
     }
   };
 
-  const openAddDialog = () => {
-    resetDialogState();
-    setDialogOpen(true);
-  };
-
-  const openEditDialog = (script: ProjectScript) => {
-    setEditingScriptId(script.id);
-    setName(script.name);
-    setIcon(script.icon);
-    setIconPickerOpen(false);
-    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
-    setValidationError(null);
-
-    if (isAgentProjectScript(script)) {
-      setCommand("");
-      setPrompt(script.prompt);
-      setAgentProvider(script.modelSelection.provider);
-      setAgentModel(script.modelSelection.model);
-      setAgentModelOptions(script.modelSelection.options);
-      setAgentInteractionMode(script.interactionMode);
-      setAgentRuntimeMode(script.runtimeMode);
-      setSubmitPromptOnLaunch(script.submitPromptOnLaunch);
-      setRunOnWorktreeCreate(false);
-    } else {
-      setCommand(script.command);
-      setPrompt("");
-      setAgentProvider(defaultSelection.provider);
-      setAgentModel(defaultSelection.model);
-      setAgentModelOptions(undefined);
-      setAgentInteractionMode("default");
-      setAgentRuntimeMode("full-access");
-      setSubmitPromptOnLaunch(true);
-      setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-    }
-
-    setDialogOpen(true);
-  };
-
   const confirmDeleteScript = useCallback(() => {
-    if (!editingScriptId) return;
+    if (!editingAction) return;
     setDeleteConfirmOpen(false);
     setDialogOpen(false);
-    void onDeleteScript(editingScriptId);
-  }, [editingScriptId, onDeleteScript]);
+    void onDeleteAction(editingAction);
+  }, [editingAction, onDeleteAction]);
+
+  const renderActionItem = useCallback(
+    ({ scope, action }: ScopedAction) => {
+      const shortcutLabel = shortcutLabelForCommand(
+        keybindings,
+        commandForScopedAction(scope, action.id),
+      );
+
+      return (
+        <MenuItem
+          key={`${scope}:${action.id}`}
+          className={`group ${dropdownItemClassName}`}
+          onClick={() => onRunAction({ scope, action })}
+        >
+          <ScriptIcon icon={action.icon} className="size-4" />
+          <span className="truncate">{displayNameForAction(scope, action)}</span>
+          <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
+            {shortcutLabel && (
+              <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                {shortcutLabel}
+              </MenuShortcut>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+              aria-label={`Edit ${action.name}`}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openEditDialog({ scope, action });
+              }}
+            >
+              <SettingsIcon className="size-3.5" />
+            </Button>
+          </span>
+        </MenuItem>
+      );
+    },
+    [dropdownItemClassName, keybindings, onRunAction, openEditDialog],
+  );
 
   return (
     <>
-      {primaryScript ? (
-        <Group aria-label="Project scripts">
+      {primaryAction ? (
+        <Group aria-label="Actions">
           <Button
             size="xs"
             variant="outline"
-            onClick={() => onRunScript(primaryScript)}
-            title={`Run ${primaryScript.name}`}
+            onClick={() => onRunAction(primaryAction)}
+            title={`Run ${primaryAction.action.name}`}
           >
-            <ScriptIcon icon={primaryScript.icon} />
+            <ScriptIcon icon={primaryAction.action.icon} />
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              {primaryScript.name}
+              {primaryAction.action.name}
             </span>
           </Button>
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu highlightItemOnHover={false}>
-            <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
-            >
+            <MenuTrigger render={<Button size="icon-xs" variant="outline" aria-label="Actions" />}>
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end">
-              {scripts.map((script) => {
-                const shortcutLabel = shortcutLabelForCommand(
-                  keybindings,
-                  commandForProjectScript(script.id),
-                );
-                return (
-                  <MenuItem
-                    key={script.id}
-                    className={`group ${dropdownItemClassName}`}
-                    onClick={() => onRunScript(script)}
-                  >
-                    <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {isShellProjectScript(script) && script.runOnWorktreeCreate
-                        ? `${script.name} (setup)`
-                        : script.name}
-                    </span>
-                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-                      {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                          {shortcutLabel}
-                        </MenuShortcut>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                        aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </span>
-                  </MenuItem>
-                );
-              })}
+              {scopedProjectScripts.map(renderActionItem)}
+              {scopedProjectScripts.length > 0 && scopedGlobalActions.length > 0 ? (
+                <MenuSeparator />
+              ) : null}
+              {scopedGlobalActions.map(renderActionItem)}
               <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
                 <PlusIcon className="size-4" />
                 Add action
@@ -629,8 +710,8 @@ export default function ProjectScriptsControl({
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
             <DialogDescription>
-              Actions are project-scoped commands or agent launches you can run from the top bar or
-              keybindings.
+              Actions are commands or agent launches you can run from the top bar or keybindings.
+              Global actions are available in every project.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -803,10 +884,6 @@ export default function ProjectScriptsControl({
                         </label>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Agent actions use the live provider registry and can only be saved with a
-                      ready provider and one of its reported models.
-                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="script-prompt">Description</Label>
@@ -817,9 +894,14 @@ export default function ProjectScriptsControl({
                       onChange={(event) => setPrompt(event.target.value)}
                     />
                   </div>
-                  <div className="rounded-md border border-border/70 px-3 py-2 text-sm text-muted-foreground">
-                    Agent actions are manual only and always launch in a fresh terminal.
-                  </div>
+                  <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                    <span>Global</span>
+                    <Switch
+                      aria-label="Global"
+                      checked={isGlobalScope}
+                      onCheckedChange={(checked) => handleGlobalScopeChange(Boolean(checked))}
+                    />
+                  </label>
                 </>
               ) : (
                 <>
@@ -833,12 +915,26 @@ export default function ProjectScriptsControl({
                     />
                   </div>
                   <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                    <span>Global</span>
+                    <Switch
+                      aria-label="Global"
+                      checked={isGlobalScope}
+                      onCheckedChange={(checked) => handleGlobalScopeChange(Boolean(checked))}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
                     <span>Run automatically on worktree creation</span>
                     <Switch
                       checked={runOnWorktreeCreate}
+                      disabled={isGlobalScope}
                       onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
                     />
                   </label>
+                  {isGlobalScope ? (
+                    <p className="text-xs text-muted-foreground">
+                      Global shell actions cannot run automatically on worktree creation.
+                    </p>
+                  ) : null}
                 </>
               )}
 

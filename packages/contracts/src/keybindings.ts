@@ -49,9 +49,19 @@ export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([
   Schema.Literal(".run"),
 ]);
 
+export const GLOBAL_ACTION_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([
+  Schema.Literal("global-action."),
+  Schema.NonEmptyString.check(
+    Schema.isMaxLength(MAX_SCRIPT_ID_LENGTH),
+    Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/),
+  ),
+  Schema.Literal(".run"),
+]);
+
 export const KeybindingCommand = Schema.Union([
   Schema.Literals(STATIC_KEYBINDING_COMMANDS),
   SCRIPT_RUN_COMMAND_PATTERN,
+  GLOBAL_ACTION_RUN_COMMAND_PATTERN,
 ]);
 export type KeybindingCommand = typeof KeybindingCommand.Type;
 

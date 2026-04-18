@@ -7,7 +7,11 @@ import {
 } from "@t3tools/shared/projectScripts";
 
 import {
+  actionPreferenceKey,
+  commandForGlobalAction,
   commandForProjectScript,
+  globalActionIdFromCommand,
+  nextResolvedActionId,
   nextProjectScriptId,
   primaryProjectScript,
   projectScriptIdFromCommand,
@@ -21,10 +25,70 @@ describe("projectScripts helpers", () => {
     expect(projectScriptIdFromCommand("terminal.toggle")).toBeNull();
   });
 
+  it("builds and parses global action run commands", () => {
+    const command = commandForGlobalAction("review");
+    expect(command).toBe("global-action.review.run");
+    expect(globalActionIdFromCommand(command)).toBe("review");
+    expect(globalActionIdFromCommand("script.review.run")).toBeNull();
+  });
+
   it("slugifies and dedupes project script ids", () => {
     expect(nextProjectScriptId("Run Tests", [])).toBe("run-tests");
     expect(nextProjectScriptId("Run Tests", ["run-tests"])).toBe("run-tests-2");
     expect(nextProjectScriptId("!!!", [])).toBe("script");
+  });
+
+  it("builds scoped action preference keys", () => {
+    expect(actionPreferenceKey("project", "lint")).toBe("project:lint");
+    expect(actionPreferenceKey("global", "review")).toBe("global:review");
+  });
+
+  it("preserves ids when moving actions across scopes unless the target id is taken", () => {
+    const globalActions: ProjectScript[] = [
+      {
+        kind: "shell",
+        id: "shared-review",
+        name: "Shared Review",
+        command: "echo review",
+        icon: "play",
+        runOnWorktreeCreate: false,
+      },
+    ];
+
+    expect(
+      nextResolvedActionId({
+        name: "Lint",
+        scope: "global",
+        projectScripts: [
+          {
+            kind: "shell",
+            id: "lint",
+            name: "Lint",
+            command: "bun lint",
+            icon: "lint",
+            runOnWorktreeCreate: false,
+          },
+        ],
+        globalActions,
+        previousAction: {
+          scope: "project",
+          action: { id: "lint" },
+        },
+      }),
+    ).toBe("lint");
+
+    expect(
+      nextResolvedActionId({
+        name: "Shared Review",
+        scope: "global",
+        projectScripts: [],
+        globalActions,
+        previousAction: {
+          scope: "project",
+          action: { id: "shared-review" },
+        },
+      }),
+    ).toBe("shared-review-2");
   });
 
   it("resolves primary and setup scripts", () => {
