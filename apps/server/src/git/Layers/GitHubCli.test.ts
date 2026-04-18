@@ -175,6 +175,58 @@ layer("GitHubCliLive", (it) => {
     }),
   );
 
+  it.effect("accepts pr list entries when gh returns headRepository.name", () =>
+    Effect.gen(function* () {
+      mockedRunProcess.mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 1806,
+            title: "chore: upgrade Vite and Vitest ecosystem packages",
+            url: "https://github.com/thecvlb/stardust-front-end/pull/1806",
+            baseRefName: "main",
+            headRefName: "t3code/vite-8-upgrade",
+            state: "OPEN",
+            mergedAt: null,
+            updatedAt: "2026-04-18T00:38:40Z",
+            isCrossRepository: false,
+            headRepository: {
+              name: "stardust-front-end",
+            },
+            headRepositoryOwner: {
+              login: "thecvlb",
+            },
+          },
+        ]),
+        stderr: "",
+        code: 0,
+        signal: null,
+        timedOut: false,
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const gh = yield* GitHubCli;
+        return yield* gh.listOpenPullRequests({
+          cwd: "/repo",
+          headSelector: "t3code/vite-8-upgrade",
+        });
+      });
+
+      assert.deepStrictEqual(result, [
+        {
+          number: 1806,
+          title: "chore: upgrade Vite and Vitest ecosystem packages",
+          url: "https://github.com/thecvlb/stardust-front-end/pull/1806",
+          baseRefName: "main",
+          headRefName: "t3code/vite-8-upgrade",
+          state: "open",
+          isCrossRepository: false,
+          headRepositoryNameWithOwner: "thecvlb/stardust-front-end",
+          headRepositoryOwnerLogin: "thecvlb",
+        },
+      ]);
+    }),
+  );
+
   it.effect("reads repository clone URLs", () =>
     Effect.gen(function* () {
       mockedRunProcess.mockResolvedValueOnce({
