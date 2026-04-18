@@ -2188,6 +2188,58 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("creates same-repo PRs against the nearest tracked ancestor branch", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      yield* runGit(repoDir, ["checkout", "-b", "jeff"]);
+      fs.writeFileSync(path.join(repoDir, "jeff.txt"), "jeff base\n");
+      yield* runGit(repoDir, ["add", "jeff.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Jeff base"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "jeff"]);
+
+      yield* runGit(repoDir, ["checkout", "-b", "feature/dropdown-terminal-bug"]);
+      fs.writeFileSync(path.join(repoDir, "feature.txt"), "feature change\n");
+      yield* runGit(repoDir, ["add", "feature.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/dropdown-terminal-bug"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            JSON.stringify([]),
+            JSON.stringify([
+              {
+                number: 401,
+                title: "Feature commit",
+                url: "https://github.com/fazulk/t3code/pull/401",
+                baseRefName: "jeff",
+                headRefName: "feature/dropdown-terminal-bug",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(result.pr.number).toBe(401);
+      expect(
+        ghCalls.some((call) =>
+          call.includes("pr create --base jeff --head feature/dropdown-terminal-bug"),
+        ),
+      ).toBe(true);
+    }),
+  );
+
   it.effect("rejects push/pr actions from detached HEAD", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
