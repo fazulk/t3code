@@ -1029,6 +1029,17 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       }
     }
 
+    if (!headContext.isCrossRepository) {
+      const trackedAncestorBaseBranch = yield* resolveTrackedAncestorBaseBranch(
+        cwd,
+        branch,
+        headContext.remoteName,
+      );
+      if (trackedAncestorBaseBranch) {
+        return trackedAncestorBaseBranch;
+      }
+    }
+
     const defaultFromGh = yield* gitHubCli
       .getDefaultBranch({ cwd })
       .pipe(Effect.catch(() => Effect.succeed(null)));
@@ -1037,6 +1048,89 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     }
 
     return "main";
+  });
+
+  const resolveTrackedAncestorBaseBranch = Effect.fn("resolveTrackedAncestorBaseBranch")(function* (
+    cwd: string,
+    branch: string,
+    remoteName: string | null,
+  ) {
+    if (!remoteName) {
+      return null;
+    }
+
+    const localBranches = yield* gitCore
+      .listLocalBranchNames(cwd)
+      .pipe(Effect.catch(() => Effect.succeed<string[]>([])));
+    let bestCandidate: { branch: string; aheadCount: number } | null = null;
+
+    for (const candidateBranch of localBranches) {
+      if (candidateBranch === branch) {
+        continue;
+      }
+
+      const candidateRemoteName = yield* gitCore
+        .readConfigValue(cwd, `branch.${candidateBranch}.remote`)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (candidateRemoteName !== remoteName) {
+        continue;
+      }
+
+      const [mergeBaseResult, candidateTipResult] = yield* Effect.all([
+        gitCore.execute({
+          operation: "GitManager.resolveTrackedAncestorBaseBranch.mergeBase",
+          cwd,
+          args: ["merge-base", "HEAD", `refs/heads/${candidateBranch}`],
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        }),
+        gitCore.execute({
+          operation: "GitManager.resolveTrackedAncestorBaseBranch.revParse",
+          cwd,
+          args: ["rev-parse", `refs/heads/${candidateBranch}`],
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        }),
+      ]);
+
+      if (
+        mergeBaseResult.code !== 0 ||
+        candidateTipResult.code !== 0 ||
+        mergeBaseResult.stdout.trim() !== candidateTipResult.stdout.trim()
+      ) {
+        continue;
+      }
+
+      const aheadCountResult = yield* gitCore.execute({
+        operation: "GitManager.resolveTrackedAncestorBaseBranch.aheadCount",
+        cwd,
+        args: ["rev-list", "--count", `${candidateBranch}..HEAD`],
+        allowNonZeroExit: true,
+        timeoutMs: 5_000,
+      });
+      if (aheadCountResult.code !== 0) {
+        continue;
+      }
+
+      const aheadCount = Number.parseInt(aheadCountResult.stdout.trim(), 10);
+      if (!Number.isFinite(aheadCount) || aheadCount <= 0) {
+        continue;
+      }
+
+      if (
+        bestCandidate === null ||
+        aheadCount < bestCandidate.aheadCount ||
+        (aheadCount === bestCandidate.aheadCount &&
+          candidateBranch.localeCompare(bestCandidate.branch) < 0)
+      ) {
+        bestCandidate = {
+          branch: candidateBranch,
+          aheadCount,
+        };
+      }
+    }
+
+    return bestCandidate?.branch ?? null;
   });
 
   const resolveCommitAndBranchSuggestion = Effect.fn("resolveCommitAndBranchSuggestion")(
