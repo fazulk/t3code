@@ -434,6 +434,27 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
+  it.effect("flushes startup input after the launched process emits output", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(
+        openInput({
+          startupInput: "\u001b[200~Review the current branch.\u001b[201~",
+        }),
+      );
+
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      expect(process.writes).toEqual([]);
+      process.emitData("ready> ");
+
+      yield* waitFor(Effect.succeed(process.writes.length === 1));
+      expect(process.writes).toEqual(["\u001b[200~Review the current branch.\u001b[201~"]);
+    }),
+  );
+
   it.effect("resizes running terminal on open when a different size is requested", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();

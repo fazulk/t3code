@@ -1717,6 +1717,9 @@ export default function ChatView(props: ChatViewProps) {
                 ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
                 env: agentLaunchSpec.env,
                 launch: agentLaunchSpec.launch,
+                ...(agentLaunchSpec.prefillInput
+                  ? { startupInput: encodeTerminalBracketedPaste(agentLaunchSpec.prefillInput) }
+                  : {}),
                 cols: SCRIPT_TERMINAL_COLS,
                 rows: SCRIPT_TERMINAL_ROWS,
               };
@@ -1745,13 +1748,6 @@ export default function ChatView(props: ChatViewProps) {
             threadId: activeThreadId,
             terminalId: targetTerminalId,
             data: `${script.command}\r`,
-          });
-        }
-        if (agentLaunchSpec?.prefillInput) {
-          await api.terminal.write({
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            data: encodeTerminalBracketedPaste(agentLaunchSpec.prefillInput),
           });
         }
       } catch (error) {

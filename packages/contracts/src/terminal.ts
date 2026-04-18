@@ -60,6 +60,9 @@ export const TerminalOpenInput = Schema.Struct({
   rows: Schema.optional(TerminalRowsSchema),
   env: Schema.optional(TerminalEnvSchema),
   launch: Schema.optional(TerminalLaunch),
+  startupInput: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(65_536)),
+  ),
 });
 export type TerminalOpenInput = Schema.Codec.Encoded<typeof TerminalOpenInput>;
 
@@ -87,6 +90,9 @@ export const TerminalRestartInput = Schema.Struct({
   rows: TerminalRowsSchema,
   env: Schema.optional(TerminalEnvSchema),
   launch: Schema.optional(TerminalLaunch),
+  startupInput: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(65_536)),
+  ),
 });
 export type TerminalRestartInput = Schema.Codec.Encoded<typeof TerminalRestartInput>;
 
