@@ -1,5 +1,7 @@
 # AGENTS.md
 
+# This is a fork, any new features should be isolated as much as possible to make syncing to origin easier in the future.
+
 ## Task Completion Requirements
 
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
