@@ -2546,7 +2546,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("runs agent actions from local draft threads in a fresh terminal without terminal writes", async () => {
+  it("runs agent actions from local draft threads in the active terminal without terminal writes", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
         [THREAD_KEY]: {
@@ -2655,7 +2655,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               ],
             },
           });
-          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+          expect(openRequest?.terminalId).toBe("default");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2670,7 +2670,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("runs agent actions from worktree draft threads at the worktree cwd", async () => {
+  it("runs agent actions from worktree draft threads in the active terminal at the worktree cwd", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
         [THREAD_KEY]: {
@@ -2797,7 +2797,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               ],
             },
           });
-          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+          expect(openRequest?.terminalId).toBe("default");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2898,7 +2898,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               args: ["-m", "gpt-5.4", "-s", "danger-full-access", "-a", "never"],
             },
           });
-          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+          expect(openRequest?.terminalId).toBe("default");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2908,6 +2908,103 @@ describe("ChatView timeline estimator parity (full app)", () => {
           (request) => request._tag === WS_METHODS.terminalWrite && request.threadId === THREAD_ID,
         ),
       ).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs agent actions in a fresh terminal when the active terminal is busy", async () => {
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [THREAD_KEY]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: THREAD_KEY,
+      },
+    });
+    useTerminalStateStore.setState({
+      terminalStateByThreadKey: {
+        [THREAD_KEY]: {
+          terminalOpen: true,
+          terminalHeight: 280,
+          terminalIds: ["default"],
+          runningTerminalIds: ["default"],
+          activeTerminalId: "default",
+          terminalGroups: [{ id: "group-default", terminalIds: ["default"] }],
+          activeTerminalGroupId: "group-default",
+        },
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(createDraftOnlySnapshot(), [
+        {
+          kind: "agent",
+          id: "review",
+          name: "Review",
+          icon: "agent",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+          },
+          prompt: "Review the current branch.",
+          submitPromptOnLaunch: true,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          runOnWorktreeCreate: false,
+        },
+      ]),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            providers: {
+              ...nextFixture.serverConfig.settings.providers,
+              codex: {
+                ...nextFixture.serverConfig.settings.providers.codex,
+                binaryPath: "/opt/codex",
+              },
+            },
+          },
+        };
+      },
+    });
+
+    try {
+      const runButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.title === "Run Review",
+          ) as HTMLButtonElement | null,
+        "Unable to find Run Review button.",
+      );
+      runButton.click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests
+            .toReversed()
+            .find(
+              (request) =>
+                request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+            ) as Record<string, unknown> | undefined;
+          expect(String(openRequest?.terminalId ?? "")).toMatch(/^terminal-/);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }
