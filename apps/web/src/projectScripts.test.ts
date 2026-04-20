@@ -11,6 +11,7 @@ import {
   primaryProjectScript,
   projectScriptIdFromCommand,
 } from "./projectScripts";
+import { mergeScopedProjectScripts, validateScopedProjectScriptId } from "./scopedProjectScripts";
 
 describe("projectScripts helpers", () => {
   it("builds and parses script run commands", () => {
@@ -46,6 +47,136 @@ describe("projectScripts helpers", () => {
 
     expect(primaryProjectScript(scripts)?.id).toBe("test");
     expect(setupProjectScript(scripts)?.id).toBe("setup");
+  });
+
+  it("merges project scripts ahead of global scripts", () => {
+    const merged = mergeScopedProjectScripts({
+      projectScripts: [
+        {
+          id: "lint",
+          name: "Lint",
+          command: "bun lint",
+          icon: "lint",
+          runOnWorktreeCreate: false,
+        },
+      ],
+      globalProjectScripts: [
+        {
+          id: "format",
+          name: "Format",
+          command: "bun fmt",
+          icon: "configure",
+          runOnWorktreeCreate: false,
+        },
+      ],
+    });
+
+    expect(merged).toMatchObject([
+      { id: "lint", scope: "project" },
+      { id: "format", scope: "global" },
+    ]);
+  });
+
+  it("rejects cross-scope script id collisions and ignores the edited source script", () => {
+    expect(
+      validateScopedProjectScriptId({
+        candidateId: "lint",
+        scope: "project",
+        globalProjectScripts: [
+          {
+            id: "lint",
+            name: "Lint",
+            command: "bun lint",
+            icon: "lint",
+            runOnWorktreeCreate: false,
+          },
+        ],
+        loadedProjects: [],
+      }),
+    ).toContain("global action");
+
+    expect(
+      validateScopedProjectScriptId({
+        candidateId: "format",
+        scope: "global",
+        currentProjectRef: {
+          environmentId: "environment-local",
+          id: "project-1",
+        },
+        currentScript: {
+          id: "format",
+          name: "Format",
+          command: "bun fmt",
+          icon: "configure",
+          runOnWorktreeCreate: false,
+          scope: "project",
+        },
+        globalProjectScripts: [],
+        loadedProjects: [
+          {
+            environmentId: "environment-local",
+            id: "project-1",
+            scripts: [
+              {
+                id: "format",
+                name: "Format",
+                command: "bun fmt",
+                icon: "configure",
+                runOnWorktreeCreate: false,
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBeNull();
+
+    expect(
+      validateScopedProjectScriptId({
+        candidateId: "format",
+        scope: "global",
+        currentProjectRef: {
+          environmentId: "environment-local",
+          id: "project-1",
+        },
+        currentScript: {
+          id: "format",
+          name: "Format",
+          command: "bun fmt",
+          icon: "configure",
+          runOnWorktreeCreate: false,
+          scope: "project",
+        },
+        globalProjectScripts: [],
+        loadedProjects: [
+          {
+            environmentId: "environment-local",
+            id: "project-1",
+            scripts: [
+              {
+                id: "format",
+                name: "Format",
+                command: "bun fmt",
+                icon: "configure",
+                runOnWorktreeCreate: false,
+              },
+            ],
+          },
+          {
+            environmentId: "environment-remote",
+            id: "project-2",
+            scripts: [
+              {
+                id: "format",
+                name: "Format",
+                command: "pnpm format",
+                icon: "configure",
+                runOnWorktreeCreate: false,
+              },
+            ],
+          },
+        ],
+      }),
+    ).toContain("project action");
   });
 
   it("builds default runtime env for scripts", () => {

@@ -1,12 +1,9 @@
-import type {
-  ProjectScript,
-  ProjectScriptIcon,
-  ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+import type { ProjectScriptIcon, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import {
   BugIcon,
   ChevronDownIcon,
   FlaskConicalIcon,
+  GlobeIcon,
   HammerIcon,
   ListChecksIcon,
   PlayIcon,
@@ -25,6 +22,7 @@ import {
   nextProjectScriptId,
   primaryProjectScript,
 } from "~/projectScripts";
+import { type ScopedProjectScript, type ScriptScope } from "~/scopedProjectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { isMacPlatform } from "~/lib/utils";
 import {
@@ -82,15 +80,16 @@ export interface NewProjectScriptInput {
   name: string;
   command: string;
   icon: ProjectScriptIcon;
+  scope: ScriptScope;
   runOnWorktreeCreate: boolean;
   keybinding: string | null;
 }
 
 interface ProjectScriptsControlProps {
-  scripts: ProjectScript[];
+  scripts: ScopedProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
-  onRunScript: (script: ProjectScript) => void;
+  onRunScript: (script: ScopedProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
   onDeleteScript: (scriptId: string) => Promise<void> | void;
@@ -157,25 +156,32 @@ export default function ProjectScriptsControl({
   onDeleteScript,
 }: ProjectScriptsControlProps) {
   const addScriptFormId = React.useId();
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [editingScript, setEditingScript] = useState<ScopedProjectScript | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [scope, setScope] = useState<ScriptScope>("project");
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  const primaryScript = useMemo(() => {
+  const primaryScript = useMemo<ScopedProjectScript | null>(() => {
     if (preferredScriptId) {
       const preferred = scripts.find((script) => script.id === preferredScriptId);
       if (preferred) return preferred;
     }
-    return primaryProjectScript(scripts);
+    return primaryProjectScript(scripts) as ScopedProjectScript | null;
   }, [preferredScriptId, scripts]);
-  const isEditing = editingScriptId !== null;
+  const editingScriptId = editingScript?.id ?? null;
+  const isEditing = editingScript !== null;
+  const isGlobalScope = scope === "global";
+  const existingIdsForScope = useMemo(
+    () => scripts.filter((script) => script.scope === scope).map((script) => script.id),
+    [scope, scripts],
+  );
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
 
@@ -207,11 +213,7 @@ export default function ProjectScriptsControl({
     setValidationError(null);
     try {
       const scriptIdForValidation =
-        editingScriptId ??
-        nextProjectScriptId(
-          trimmedName,
-          scripts.map((script) => script.id),
-        );
+        editingScriptId ?? nextProjectScriptId(trimmedName, existingIdsForScope);
       const keybindingRule = decodeProjectScriptKeybindingRule({
         keybinding,
         command: commandForProjectScript(scriptIdForValidation),
@@ -220,7 +222,8 @@ export default function ProjectScriptsControl({
         name: trimmedName,
         command: trimmedCommand,
         icon,
-        runOnWorktreeCreate,
+        scope,
+        runOnWorktreeCreate: isGlobalScope ? false : runOnWorktreeCreate,
         keybinding: keybindingRule?.key ?? null,
       } satisfies NewProjectScriptInput;
       if (editingScriptId) {
@@ -236,23 +239,25 @@ export default function ProjectScriptsControl({
   };
 
   const openAddDialog = () => {
-    setEditingScriptId(null);
+    setEditingScript(null);
     setName("");
     setCommand("");
     setIcon("play");
     setIconPickerOpen(false);
+    setScope("project");
     setRunOnWorktreeCreate(false);
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
   };
 
-  const openEditDialog = (script: ProjectScript) => {
-    setEditingScriptId(script.id);
+  const openEditDialog = (script: ScopedProjectScript) => {
+    setEditingScript(script);
     setName(script.name);
     setCommand(script.command);
     setIcon(script.icon);
     setIconPickerOpen(false);
+    setScope(script.scope);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setValidationError(null);
@@ -269,7 +274,7 @@ export default function ProjectScriptsControl({
   return (
     <>
       {primaryScript ? (
-        <Group aria-label="Project scripts">
+        <Group aria-label="Actions">
           <Button
             size="xs"
             variant="outline"
@@ -295,41 +300,45 @@ export default function ProjectScriptsControl({
                   commandForProjectScript(script.id),
                 );
                 return (
-                  <MenuItem
-                    key={script.id}
-                    className={`group ${dropdownItemClassName}`}
-                    onClick={() => onRunScript(script)}
-                  >
-                    <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-                    </span>
-                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-                      {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                          {shortcutLabel}
-                        </MenuShortcut>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                        aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </span>
-                  </MenuItem>
+                  <React.Fragment key={script.id}>
+                    <MenuItem
+                      className={`group ${dropdownItemClassName}`}
+                      onClick={() => onRunScript(script)}
+                    >
+                      <ScriptIcon icon={script.icon} className="size-4" />
+                      <span className="truncate">
+                        {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
+                      </span>
+                      <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end pr-7">
+                        {script.scope === "global" && (
+                          <GlobeIcon className="mr-1 size-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        {shortcutLabel && (
+                          <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                            {shortcutLabel}
+                          </MenuShortcut>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
+                          aria-label={`Edit ${script.name}`}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openEditDialog(script);
+                          }}
+                        >
+                          <SettingsIcon className="size-3.5" />
+                        </Button>
+                      </span>
+                    </MenuItem>
+                  </React.Fragment>
                 );
               })}
               <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
@@ -357,10 +366,11 @@ export default function ProjectScriptsControl({
         }}
         onOpenChangeComplete={(open) => {
           if (open) return;
-          setEditingScriptId(null);
+          setEditingScript(null);
           setName("");
           setCommand("");
           setIcon("play");
+          setScope("project");
           setRunOnWorktreeCreate(false);
           setKeybinding("");
           setValidationError(null);
@@ -371,7 +381,8 @@ export default function ProjectScriptsControl({
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
             <DialogDescription>
-              Actions are project-scoped commands you can run from the top bar or keybindings.
+              Actions run from the top bar or keybindings. Turn on Use in any project to save one
+              globally on this client.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -450,10 +461,31 @@ export default function ProjectScriptsControl({
                 />
               </div>
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
-                <span>Run automatically on worktree creation</span>
+                <span className="space-y-1">
+                  <span className="block">Run automatically on worktree creation</span>
+                  {isGlobalScope && (
+                    <span className="block text-xs text-muted-foreground">
+                      Setup automation is project-only.
+                    </span>
+                  )}
+                </span>
                 <Switch
                   checked={runOnWorktreeCreate}
+                  disabled={isGlobalScope}
                   onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                <span>Global action</span>
+                <Switch
+                  checked={isGlobalScope}
+                  onCheckedChange={(checked) => {
+                    const nextScope = checked ? "global" : "project";
+                    setScope(nextScope);
+                    if (checked) {
+                      setRunOnWorktreeCreate(false);
+                    }
+                  }}
                 />
               </label>
               {validationError && <p className="text-sm text-destructive">{validationError}</p>}

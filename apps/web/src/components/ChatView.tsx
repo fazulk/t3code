@@ -109,9 +109,10 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
+import { mergeScopedProjectScripts, validateScopedProjectScriptId } from "~/scopedProjectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
-import { useSettings } from "../hooks/useSettings";
+import { useSettings, useUpdateSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -313,6 +314,32 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+
+function upsertProjectScript(
+  scripts: ReadonlyArray<ProjectScript>,
+  nextScript: ProjectScript,
+): ProjectScript[] {
+  const hasExistingScript = scripts.some((script) => script.id === nextScript.id);
+  const nextScripts = scripts.map((script) => {
+    if (script.id === nextScript.id) {
+      return nextScript;
+    }
+    if (nextScript.runOnWorktreeCreate && script.runOnWorktreeCreate) {
+      return { ...script, runOnWorktreeCreate: false };
+    }
+    return script;
+  });
+  return hasExistingScript ? nextScripts : [...nextScripts, nextScript];
+}
+
+function upsertGlobalProjectScript(
+  scripts: ReadonlyArray<ProjectScript>,
+  nextScript: ProjectScript,
+): ProjectScript[] {
+  const hasExistingScript = scripts.some((script) => script.id === nextScript.id);
+  const nextScripts = scripts.map((script) => (script.id === nextScript.id ? nextScript : script));
+  return hasExistingScript ? nextScripts : [...nextScripts, nextScript];
+}
 
 type ChatViewProps =
   | {
@@ -611,6 +638,8 @@ export default function ChatView(props: ChatViewProps) {
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
   const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const globalProjectScripts = settings.globalProjectScripts;
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -837,6 +866,16 @@ export default function ChatView(props: ChatViewProps) {
   const activeProject = useStore(
     useMemo(() => createProjectSelectorByRef(activeProjectRef), [activeProjectRef]),
   );
+  const mergedProjectScripts = useMemo(
+    () =>
+      activeProject
+        ? mergeScopedProjectScripts({
+            projectScripts: activeProject.scripts,
+            globalProjectScripts,
+          })
+        : [],
+    [activeProject, globalProjectScripts],
+  );
 
   useEffect(() => {
     if (routeKind !== "server") {
@@ -848,6 +887,15 @@ export default function ChatView(props: ChatViewProps) {
   // Compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.
   const allProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const loadedProjectScripts = useMemo(
+    () =>
+      allProjects.map((project) => ({
+        environmentId: project.environmentId,
+        id: project.id,
+        scripts: project.scripts,
+      })),
+    [allProjects],
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
@@ -1732,25 +1780,8 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const persistProjectScripts = useCallback(
-    async (input: {
-      projectId: ProjectId;
-      projectCwd: string;
-      previousScripts: ProjectScript[];
-      nextScripts: ProjectScript[];
-      keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
-    }) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api) return;
-
-      await api.orchestration.dispatchCommand({
-        type: "project.meta.update",
-        commandId: newCommandId(),
-        projectId: input.projectId,
-        scripts: input.nextScripts,
-      });
-
+  const persistProjectScriptKeybinding = useCallback(
+    async (input: { keybinding?: string | null; keybindingCommand: KeybindingCommand }) => {
       const keybindingRule = decodeProjectScriptKeybindingRule({
         keybinding: input.keybinding,
         command: input.keybindingCommand,
@@ -1764,89 +1795,172 @@ export default function ChatView(props: ChatViewProps) {
         await localApi.server.upsertKeybinding(keybindingRule);
       }
     },
+    [],
+  );
+  const persistProjectScripts = useCallback(
+    async (input: { projectId: ProjectId; nextScripts: ProjectScript[] }) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
+
+      await api.orchestration.dispatchCommand({
+        type: "project.meta.update",
+        commandId: newCommandId(),
+        projectId: input.projectId,
+        scripts: input.nextScripts,
+      });
+    },
     [environmentId],
+  );
+  const persistGlobalProjectScripts = useCallback(
+    (nextScripts: ProjectScript[]) => {
+      updateSettings({ globalProjectScripts: nextScripts });
+    },
+    [updateSettings],
   );
   const saveProjectScript = useCallback(
     async (input: NewProjectScriptInput) => {
       if (!activeProject) return;
       const nextId = nextProjectScriptId(
         input.name,
-        activeProject.scripts.map((script) => script.id),
+        (input.scope === "project" ? activeProject.scripts : globalProjectScripts).map(
+          (script) => script.id,
+        ),
       );
+      const validationError = validateScopedProjectScriptId({
+        candidateId: nextId,
+        scope: input.scope,
+        currentProjectRef: {
+          environmentId: activeProject.environmentId,
+          id: activeProject.id,
+        },
+        globalProjectScripts,
+        loadedProjects: loadedProjectScripts,
+      });
+      if (validationError) {
+        throw new Error(validationError);
+      }
       const nextScript: ProjectScript = {
         id: nextId,
         name: input.name,
         command: input.command,
         icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
+        runOnWorktreeCreate: input.scope === "project" && input.runOnWorktreeCreate,
       };
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
+      if (input.scope === "global") {
+        await persistGlobalProjectScripts(
+          upsertGlobalProjectScript(globalProjectScripts, nextScript),
+        );
+      } else {
+        await persistProjectScripts({
+          projectId: activeProject.id,
+          nextScripts: upsertProjectScript(activeProject.scripts, nextScript),
+        });
+      }
+      await persistProjectScriptKeybinding({
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(nextId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [
+      activeProject,
+      globalProjectScripts,
+      loadedProjectScripts,
+      persistGlobalProjectScripts,
+      persistProjectScriptKeybinding,
+      persistProjectScripts,
+    ],
   );
   const updateProjectScript = useCallback(
     async (scriptId: string, input: NewProjectScriptInput) => {
       if (!activeProject) return;
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
+      const existingScript = mergedProjectScripts.find((script) => script.id === scriptId);
       if (!existingScript) {
         throw new Error("Script not found.");
       }
+      const validationError = validateScopedProjectScriptId({
+        candidateId: scriptId,
+        scope: input.scope,
+        currentProjectRef: {
+          environmentId: activeProject.environmentId,
+          id: activeProject.id,
+        },
+        currentScript: existingScript,
+        globalProjectScripts,
+        loadedProjects: loadedProjectScripts,
+      });
+      if (validationError) {
+        throw new Error(validationError);
+      }
 
       const updatedScript: ProjectScript = {
-        ...existingScript,
+        id: scriptId,
         name: input.name,
         command: input.command,
         icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
+        runOnWorktreeCreate: input.scope === "project" && input.runOnWorktreeCreate,
       };
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.runOnWorktreeCreate
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
-      );
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
+      if (existingScript.scope === "project" && input.scope === "project") {
+        await persistProjectScripts({
+          projectId: activeProject.id,
+          nextScripts: upsertProjectScript(activeProject.scripts, updatedScript),
+        });
+      } else if (existingScript.scope === "project" && input.scope === "global") {
+        await persistProjectScripts({
+          projectId: activeProject.id,
+          nextScripts: activeProject.scripts.filter((script) => script.id !== scriptId),
+        });
+        await persistGlobalProjectScripts(
+          upsertGlobalProjectScript(globalProjectScripts, updatedScript),
+        );
+      } else if (existingScript.scope === "global" && input.scope === "project") {
+        await persistProjectScripts({
+          projectId: activeProject.id,
+          nextScripts: upsertProjectScript(activeProject.scripts, updatedScript),
+        });
+        await persistGlobalProjectScripts(
+          globalProjectScripts.filter((script) => script.id !== scriptId),
+        );
+      } else {
+        await persistGlobalProjectScripts(
+          upsertGlobalProjectScript(globalProjectScripts, updatedScript),
+        );
+      }
+      await persistProjectScriptKeybinding({
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(scriptId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [
+      activeProject,
+      globalProjectScripts,
+      loadedProjectScripts,
+      mergedProjectScripts,
+      persistGlobalProjectScripts,
+      persistProjectScriptKeybinding,
+      persistProjectScripts,
+    ],
   );
   const deleteProjectScript = useCallback(
     async (scriptId: string) => {
       if (!activeProject) return;
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
-
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+      const existingScript = mergedProjectScripts.find((script) => script.id === scriptId);
+      if (!existingScript) {
+        return;
+      }
+      const deletedName = existingScript.name;
 
       try {
-        await persistProjectScripts({
-          projectId: activeProject.id,
-          projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
-          nextScripts,
+        if (existingScript.scope === "global") {
+          await persistGlobalProjectScripts(
+            globalProjectScripts.filter((script) => script.id !== scriptId),
+          );
+        } else {
+          await persistProjectScripts({
+            projectId: activeProject.id,
+            nextScripts: activeProject.scripts.filter((script) => script.id !== scriptId),
+          });
+        }
+        await persistProjectScriptKeybinding({
           keybinding: null,
           keybindingCommand: commandForProjectScript(scriptId),
         });
@@ -1862,7 +1976,14 @@ export default function ChatView(props: ChatViewProps) {
         });
       }
     },
-    [activeProject, persistProjectScripts],
+    [
+      activeProject,
+      globalProjectScripts,
+      mergedProjectScripts,
+      persistGlobalProjectScripts,
+      persistProjectScriptKeybinding,
+      persistProjectScripts,
+    ],
   );
 
   const handleRuntimeModeChange = useCallback(
@@ -2292,7 +2413,7 @@ export default function ChatView(props: ChatViewProps) {
 
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
-      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
+      const script = mergedProjectScripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
       event.stopPropagation();
@@ -2302,6 +2423,7 @@ export default function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     activeProject,
+    mergedProjectScripts,
     terminalState.terminalOpen,
     terminalState.activeTerminalId,
     activeThreadId,
@@ -3233,7 +3355,7 @@ export default function ChatView(props: ChatViewProps) {
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
+          activeProjectScripts={activeProject ? mergedProjectScripts : undefined}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
           }
