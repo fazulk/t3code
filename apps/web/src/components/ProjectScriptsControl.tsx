@@ -1,5 +1,12 @@
-import type { ProjectScriptIcon, ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type {
+  AgentActionConfig,
+  ProjectScriptIcon,
+  ResolvedKeybindingsConfig,
+  ServerProvider,
+} from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
+  BotIcon,
   BugIcon,
   ChevronDownIcon,
   FlaskConicalIcon,
@@ -25,6 +32,8 @@ import {
 import { type ScopedProjectScript, type ScriptScope } from "~/scopedProjectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { isMacPlatform } from "~/lib/utils";
+import { type AgentActionDefaults } from "~/lib/agentActionDefaults";
+import { AgentActionFields } from "./AgentActionFields";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -59,6 +68,7 @@ const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "configure", label: "Configure" },
   { id: "build", label: "Build" },
   { id: "debug", label: "Debug" },
+  { id: "agent", label: "Agent" },
 ];
 
 function ScriptIcon({
@@ -73,13 +83,67 @@ function ScriptIcon({
   if (icon === "configure") return <WrenchIcon className={className} />;
   if (icon === "build") return <HammerIcon className={className} />;
   if (icon === "debug") return <BugIcon className={className} />;
+  if (icon === "agent") return <BotIcon className={className} />;
   return <PlayIcon className={className} />;
+}
+
+function cloneAgentActionConfig(config: AgentActionConfig): AgentActionConfig {
+  if (config.provider === "codex") {
+    return {
+      ...config,
+      modelSelection: config.modelSelection.options
+        ? {
+            ...config.modelSelection,
+            options: { ...config.modelSelection.options },
+          }
+        : { ...config.modelSelection },
+    };
+  }
+
+  return {
+    ...config,
+    modelSelection: config.modelSelection.options
+      ? {
+          ...config.modelSelection,
+          options: { ...config.modelSelection.options },
+        }
+      : { ...config.modelSelection },
+  };
+}
+
+function createAgentActionConfigFromDefaults(defaults: AgentActionDefaults): AgentActionConfig {
+  if (defaults.provider === "codex") {
+    return {
+      provider: "codex",
+      modelSelection: defaults.modelSelection.options
+        ? {
+            ...defaults.modelSelection,
+            options: { ...defaults.modelSelection.options },
+          }
+        : { ...defaults.modelSelection },
+      runtimeMode: defaults.runtimeMode,
+      interactionMode: defaults.interactionMode,
+    };
+  }
+
+  return {
+    provider: "claudeAgent",
+    modelSelection: defaults.modelSelection.options
+      ? {
+          ...defaults.modelSelection,
+          options: { ...defaults.modelSelection.options },
+        }
+      : { ...defaults.modelSelection },
+    runtimeMode: defaults.runtimeMode,
+    interactionMode: defaults.interactionMode,
+  };
 }
 
 export interface NewProjectScriptInput {
   name: string;
   command: string;
   icon: ProjectScriptIcon;
+  agentConfig: AgentActionConfig | null;
   scope: ScriptScope;
   runOnWorktreeCreate: boolean;
   keybinding: string | null;
@@ -88,6 +152,9 @@ export interface NewProjectScriptInput {
 interface ProjectScriptsControlProps {
   scripts: ScopedProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
+  providerStatuses: ReadonlyArray<ServerProvider>;
+  settings: UnifiedSettings;
+  agentActionDefaults: AgentActionDefaults;
   preferredScriptId?: string | null;
   onRunScript: (script: ScopedProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
@@ -149,6 +216,9 @@ function keybindingFromEvent(event: KeyboardEvent<HTMLInputElement>): string | n
 export default function ProjectScriptsControl({
   scripts,
   keybindings,
+  providerStatuses,
+  settings,
+  agentActionDefaults,
   preferredScriptId = null,
   onRunScript,
   onAddScript,
@@ -164,6 +234,7 @@ export default function ProjectScriptsControl({
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [scope, setScope] = useState<ScriptScope>("project");
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
+  const [agentConfig, setAgentConfig] = useState<AgentActionConfig | null>(null);
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -178,6 +249,7 @@ export default function ProjectScriptsControl({
   const editingScriptId = editingScript?.id ?? null;
   const isEditing = editingScript !== null;
   const isGlobalScope = scope === "global";
+  const isAgentIcon = icon === "agent";
   const existingIdsForScope = useMemo(
     () => scripts.filter((script) => script.scope === scope).map((script) => script.id),
     [scope, scripts],
@@ -206,7 +278,11 @@ export default function ProjectScriptsControl({
       return;
     }
     if (trimmedCommand.length === 0) {
-      setValidationError("Command is required.");
+      setValidationError(isAgentIcon ? "Prompt is required." : "Command is required.");
+      return;
+    }
+    if (isAgentIcon && !agentConfig) {
+      setValidationError("Agent settings are required.");
       return;
     }
 
@@ -222,6 +298,7 @@ export default function ProjectScriptsControl({
         name: trimmedName,
         command: trimmedCommand,
         icon,
+        agentConfig: isAgentIcon && agentConfig ? cloneAgentActionConfig(agentConfig) : null,
         scope,
         runOnWorktreeCreate: isGlobalScope ? false : runOnWorktreeCreate,
         keybinding: keybindingRule?.key ?? null,
@@ -246,6 +323,7 @@ export default function ProjectScriptsControl({
     setIconPickerOpen(false);
     setScope("project");
     setRunOnWorktreeCreate(false);
+    setAgentConfig(null);
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
@@ -259,6 +337,7 @@ export default function ProjectScriptsControl({
     setIconPickerOpen(false);
     setScope(script.scope);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+    setAgentConfig(script.agentConfig ? cloneAgentActionConfig(script.agentConfig) : null);
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setValidationError(null);
     setDialogOpen(true);
@@ -372,6 +451,7 @@ export default function ProjectScriptsControl({
           setIcon("play");
           setScope("project");
           setRunOnWorktreeCreate(false);
+          setAgentConfig(null);
           setKeybinding("");
           setValidationError(null);
         }}
@@ -417,6 +497,11 @@ export default function ProjectScriptsControl({
                                   : "border-border/70 hover:bg-accent/60"
                               }`}
                               onClick={() => {
+                                if (entry.id === "agent" && !agentConfig) {
+                                  setAgentConfig(
+                                    createAgentActionConfigFromDefaults(agentActionDefaults),
+                                  );
+                                }
                                 setIcon(entry.id);
                                 setIconPickerOpen(false);
                               }}
@@ -452,14 +537,28 @@ export default function ProjectScriptsControl({
                 </p>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="script-command">Command</Label>
+                <Label htmlFor="script-command">{isAgentIcon ? "Prompt" : "Command"}</Label>
                 <Textarea
                   id="script-command"
-                  placeholder="bun test"
+                  placeholder={
+                    isAgentIcon ? "Review the repo and explain the failing test." : "bun test"
+                  }
                   value={command}
                   onChange={(event) => setCommand(event.target.value)}
                 />
               </div>
+              {isAgentIcon && agentConfig ? (
+                <AgentActionFields
+                  value={agentConfig}
+                  providerStatuses={providerStatuses}
+                  settings={settings}
+                  prompt={command}
+                  onPromptChange={setCommand}
+                  onChange={(nextAgentConfig) => {
+                    setAgentConfig(nextAgentConfig);
+                  }}
+                />
+              ) : null}
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
                 <span className="space-y-1">
                   <span className="block">Run automatically on worktree creation</span>

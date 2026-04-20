@@ -6,6 +6,7 @@ import {
   DEFAULT_TERMINAL_ID,
   type TerminalEvent,
   type TerminalOpenInput,
+  type TerminalProcessLaunch,
   type TerminalRestartInput,
 } from "@t3tools/contracts";
 import {
@@ -157,6 +158,14 @@ function openInput(overrides: Partial<TerminalOpenInput> = {}): TerminalOpenInpu
   };
 }
 
+function processLaunch(overrides: Partial<TerminalProcessLaunch> = {}): TerminalProcessLaunch {
+  return {
+    executable: "codex",
+    args: ["exec", "--model", "gpt-5.4"],
+    ...overrides,
+  };
+}
+
 function restartInput(overrides: Partial<TerminalRestartInput> = {}): TerminalRestartInput {
   return {
     threadId: "thread-1",
@@ -277,6 +286,27 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       assert.equal(second.threadId, "thread-1");
       assert.equal(third.threadId, "thread-1");
       expect(ptyAdapter.spawnInputs).toHaveLength(1);
+    }),
+  );
+
+  it.effect("spawns an explicit process launch when terminal.open provides one", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+
+      yield* manager.open(
+        openInput({
+          launch: processLaunch({
+            executable: "claude",
+            args: ["--model", "claude-sonnet-4-5", "Review this diff"],
+          }),
+        }),
+      );
+
+      const [spawnInput] = ptyAdapter.spawnInputs;
+      expect(spawnInput).toMatchObject({
+        shell: "claude",
+        args: ["--model", "claude-sonnet-4-5", "Review this diff"],
+      });
     }),
   );
 

@@ -103,6 +103,8 @@ import { ChevronDownIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
+import { buildAgentActionTerminalLaunch } from "~/lib/agentActionCommand";
+import { deriveAgentActionDefaults, isAgentActionProvider } from "~/lib/agentActionDefaults";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
   commandForProjectScript,
@@ -126,6 +128,7 @@ import {
   type DraftThreadEnvMode,
   useComposerDraftStore,
   type DraftId,
+  useEffectiveComposerModelState,
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
@@ -876,7 +879,6 @@ export default function ChatView(props: ChatViewProps) {
         : [],
     [activeProject, globalProjectScripts],
   );
-
   useEffect(() => {
     if (routeKind !== "server") {
       return;
@@ -1100,6 +1102,49 @@ export default function ChatView(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const effectiveComposerModelState = useEffectiveComposerModelState({
+    threadRef: composerDraftTarget,
+    providers: providerStatuses,
+    selectedProvider,
+    threadModelSelection: activeThread?.modelSelection,
+    projectModelSelection: activeProject?.defaultModelSelection,
+    settings,
+  });
+  const codexAgentModelState = useEffectiveComposerModelState({
+    threadRef: composerDraftTarget,
+    providers: providerStatuses,
+    selectedProvider: "codex",
+    threadModelSelection: activeThread?.modelSelection,
+    projectModelSelection: activeProject?.defaultModelSelection,
+    settings,
+  });
+  const agentActionDefaults = useMemo(
+    () =>
+      deriveAgentActionDefaults({
+        currentProvider: selectedProvider,
+        currentModelSelection: createModelSelection(
+          selectedProvider,
+          effectiveComposerModelState.selectedModel,
+          effectiveComposerModelState.modelOptions?.[selectedProvider],
+        ),
+        fallbackCodexModelSelection: createModelSelection(
+          "codex",
+          codexAgentModelState.selectedModel,
+          codexAgentModelState.modelOptions?.codex,
+        ) as Extract<ModelSelection, { provider: "codex" }>,
+        runtimeMode,
+        interactionMode,
+      }),
+    [
+      codexAgentModelState.modelOptions,
+      codexAgentModelState.selectedModel,
+      effectiveComposerModelState.modelOptions,
+      effectiveComposerModelState.selectedModel,
+      interactionMode,
+      runtimeMode,
+      selectedProvider,
+    ],
+  );
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
@@ -1688,6 +1733,24 @@ export default function ChatView(props: ChatViewProps) {
     ) => {
       const api = readEnvironmentApi(environmentId);
       if (!api || !activeThreadId || !activeProject || !activeThread) return;
+      if (script.icon === "agent") {
+        if (!script.agentConfig || !isAgentActionProvider(script.agentConfig.provider)) {
+          toastManager.add({
+            type: "error",
+            title: "Could not run agent action",
+            description: "This action is missing a supported agent configuration.",
+          });
+          return;
+        }
+        if (script.command.trim().length === 0) {
+          toastManager.add({
+            type: "error",
+            title: "Could not run agent action",
+            description: "This action does not have a prompt to run.",
+          });
+          return;
+        }
+      }
       if (options?.rememberAsLastInvoked !== false) {
         setLastInvokedScriptByProjectId((current) => {
           if (current[activeProject.id] === script.id) return current;
@@ -1700,7 +1763,8 @@ export default function ChatView(props: ChatViewProps) {
         terminalState.terminalIds[0] ||
         DEFAULT_THREAD_TERMINAL_ID;
       const isBaseTerminalBusy = terminalState.runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
+      const wantsNewTerminal =
+        Boolean(options?.preferNewTerminal) || isBaseTerminalBusy || script.icon === "agent";
       const shouldCreateNewTerminal = wantsNewTerminal;
       const targetTerminalId = shouldCreateNewTerminal
         ? `terminal-${randomUUID()}`
@@ -1730,13 +1794,23 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
+      const agentLaunchInput =
+        script.icon === "agent"
+          ? buildAgentActionTerminalLaunch({
+              prompt: script.command,
+              agentConfig: script.agentConfig!,
+              env: runtimeEnv,
+              settings,
+            })
+          : null;
       const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
         ? {
             threadId: activeThreadId,
             terminalId: targetTerminalId,
             cwd: targetCwd,
             ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
+            env: agentLaunchInput?.env ?? runtimeEnv,
+            ...(agentLaunchInput ? { launch: agentLaunchInput.launch } : {}),
             cols: SCRIPT_TERMINAL_COLS,
             rows: SCRIPT_TERMINAL_ROWS,
           }
@@ -1745,16 +1819,19 @@ export default function ChatView(props: ChatViewProps) {
             terminalId: targetTerminalId,
             cwd: targetCwd,
             ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-            env: runtimeEnv,
+            env: agentLaunchInput?.env ?? runtimeEnv,
+            ...(agentLaunchInput ? { launch: agentLaunchInput.launch } : {}),
           };
 
       try {
         await api.terminal.open(openTerminalInput);
-        await api.terminal.write({
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          data: `${script.command}\r`,
-        });
+        if (script.icon !== "agent") {
+          await api.terminal.write({
+            threadId: activeThreadId,
+            terminalId: targetTerminalId,
+            data: `${script.command}\r`,
+          });
+        }
       } catch (error) {
         setThreadError(
           activeThreadId,
@@ -1774,6 +1851,7 @@ export default function ChatView(props: ChatViewProps) {
       storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
       environmentId,
+      settings,
       terminalState.activeTerminalId,
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
@@ -1845,6 +1923,7 @@ export default function ChatView(props: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.scope === "project" && input.runOnWorktreeCreate,
+        ...(input.agentConfig ? { agentConfig: input.agentConfig } : {}),
       };
       if (input.scope === "global") {
         await persistGlobalProjectScripts(
@@ -1898,6 +1977,7 @@ export default function ChatView(props: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.scope === "project" && input.runOnWorktreeCreate,
+        ...(input.agentConfig ? { agentConfig: input.agentConfig } : {}),
       };
       if (existingScript.scope === "project" && input.scope === "project") {
         await persistProjectScripts({
@@ -3360,6 +3440,9 @@ export default function ChatView(props: ChatViewProps) {
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
           }
           keybindings={keybindings}
+          providerStatuses={providerStatuses}
+          settings={settings}
+          agentActionDefaults={agentActionDefaults}
           availableEditors={availableEditors}
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}

@@ -1,13 +1,16 @@
 import {
+  type ServerProvider,
   type EnvironmentId,
   type EditorId,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
+import { type AgentActionDefaults } from "~/lib/agentActionDefaults";
 import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -28,6 +31,9 @@ interface ChatHeaderProps {
   activeProjectScripts: ScopedProjectScript[] | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
+  providerStatuses: ReadonlyArray<ServerProvider>;
+  settings: UnifiedSettings;
+  agentActionDefaults: AgentActionDefaults;
   availableEditors: ReadonlyArray<EditorId>;
   terminalAvailable: boolean;
   terminalOpen: boolean;
@@ -54,6 +60,9 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectScripts,
   preferredScriptId,
   keybindings,
+  providerStatuses,
+  settings,
+  agentActionDefaults,
   availableEditors,
   terminalAvailable,
   terminalOpen,
@@ -94,6 +103,9 @@ export const ChatHeader = memo(function ChatHeader({
           <ProjectScriptsControl
             scripts={activeProjectScripts}
             keybindings={keybindings}
+            providerStatuses={providerStatuses}
+            settings={settings}
+            agentActionDefaults={agentActionDefaults}
             preferredScriptId={preferredScriptId}
             onRunScript={onRunProjectScript}
             onAddScript={onAddProjectScript}
