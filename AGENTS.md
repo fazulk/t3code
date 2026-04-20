@@ -1,5 +1,7 @@
 # AGENTS.md
 
+!! This is a fork that will probably never be merged back upstream. Do your best to isolate new features and fixes to separate files that won't conflict with the original codebase.
+
 ## Task Completion Requirements
 
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
