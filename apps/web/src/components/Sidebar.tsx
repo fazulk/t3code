@@ -11,6 +11,7 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { GitHubIcon } from "./Icons";
 import {
   prStatusIndicator,
   resolveThreadPr,
@@ -151,6 +152,7 @@ import {
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
+  resolveSidebarProjectGitHubUrl,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -291,7 +293,14 @@ interface SidebarThreadRowProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
-  openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+  openExternalLink: (
+    event: React.MouseEvent<HTMLElement>,
+    url: string,
+    options: {
+      errorTitle: string;
+      unavailableTitle?: string;
+    },
+  ) => void;
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -316,7 +325,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     commitRename,
     cancelRename,
     attemptArchiveThread,
-    openPrLink,
+    openExternalLink,
     thread,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
@@ -437,9 +446,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const handlePrClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       if (!prStatus) return;
-      openPrLink(event, prStatus.url);
+      openExternalLink(event, prStatus.url, {
+        errorTitle: "Unable to open PR link",
+      });
     },
-    [openPrLink, prStatus],
+    [openExternalLink, prStatus],
   );
   const handleRenameInputRef = useCallback(
     (element: HTMLInputElement | null) => {
@@ -744,7 +755,14 @@ interface SidebarProjectThreadListProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
-  openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+  openExternalLink: (
+    event: React.MouseEvent<HTMLElement>,
+    url: string,
+    options: {
+      errorTitle: string;
+      unavailableTitle?: string;
+    },
+  ) => void;
   expandThreadListForProject: (projectKey: string) => void;
   collapseThreadListForProject: (projectKey: string) => void;
 }
@@ -783,7 +801,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     commitRename,
     cancelRename,
     attemptArchiveThread,
-    openPrLink,
+    openExternalLink,
     expandThreadListForProject,
     collapseThreadListForProject,
   } = props;
@@ -833,7 +851,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               commitRename={commitRename}
               cancelRename={cancelRename}
               attemptArchiveThread={attemptArchiveThread}
-              openPrLink={openPrLink}
+              openExternalLink={openExternalLink}
             />
           );
         })}
@@ -975,27 +993,51 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     },
   });
-  const openPrLink = useCallback((event: React.MouseEvent<HTMLElement>, prUrl: string) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const projectGitHubUrl = resolveSidebarProjectGitHubUrl(project);
+  const openExternalLink = useCallback(
+    (
+      event: React.MouseEvent<HTMLElement>,
+      url: string,
+      options: {
+        errorTitle: string;
+        unavailableTitle?: string;
+      },
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
 
-    const api = readLocalApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Link opening is unavailable.",
-      });
-      return;
-    }
+      const api = readLocalApi();
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: options.unavailableTitle ?? "Link opening is unavailable.",
+        });
+        return;
+      }
 
-    void api.shell.openExternal(prUrl).catch((error) => {
-      toastManager.add({
-        type: "error",
-        title: "Unable to open PR link",
-        description: error instanceof Error ? error.message : "An error occurred.",
+      void api.shell.openExternal(url).catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: options.errorTitle,
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
       });
-    });
-  }, []);
+    },
+    [],
+  );
+  const handleProjectRepoClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (!projectGitHubUrl) {
+        return;
+      }
+
+      openExternalLink(event, projectGitHubUrl, {
+        errorTitle: "Unable to open repository link",
+        unavailableTitle: "Repository link opening is unavailable.",
+      });
+    },
+    [openExternalLink, projectGitHubUrl],
+  );
   const sidebarThreads = useStore(
     useShallow(
       useMemo(
@@ -1975,7 +2017,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           </span>
         </SidebarMenuButton>
         {/* Environment badge – visible by default, crossfades with the
-            "new thread" button on hover using the same pointer-events +
+            project action buttons on hover using the same pointer-events +
             opacity pattern as the thread row archive/timestamp swap. */}
         {project.environmentPresence === "remote-only" && (
           <Tooltip>
@@ -1998,10 +2040,27 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             </TooltipPopup>
           </Tooltip>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <div className="pointer-events-none absolute top-1 right-1.5 opacity-0 transition-opacity duration-150 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+        <div className="pointer-events-none absolute top-1 right-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+          {projectGitHubUrl ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Open repository on GitHub"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                    onClick={handleProjectRepoClick}
+                  >
+                    <GitHubIcon className="size-3.5" />
+                  </button>
+                }
+              />
+              <TooltipPopup side="top">Open repository on GitHub</TooltipPopup>
+            </Tooltip>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
                 <button
                   type="button"
                   aria-label={`Create new thread in ${project.displayName}`}
@@ -2011,13 +2070,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 >
                   <SquarePenIcon className="size-3.5" />
                 </button>
-              </div>
-            }
-          />
-          <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
-          </TooltipPopup>
-        </Tooltip>
+              }
+            />
+            <TooltipPopup side="top">
+              {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
       </div>
 
       <SidebarProjectThreadList
@@ -2051,7 +2110,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         commitRename={commitRename}
         cancelRename={cancelRename}
         attemptArchiveThread={attemptArchiveThread}
-        openPrLink={openPrLink}
+        openExternalLink={openExternalLink}
         expandThreadListForProject={expandThreadListForProject}
         collapseThreadListForProject={collapseThreadListForProject}
       />
