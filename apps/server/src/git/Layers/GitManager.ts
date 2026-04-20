@@ -227,25 +227,23 @@ function matchesBranchHeadContext(
   const prHeadOwner =
     normalizeOptionalOwnerLogin(pr.headRepositoryOwnerLogin) ??
     parseRepositoryOwnerLogin(prHeadRepository);
+  const expectsHeadIdentity = Boolean(expectedHeadRepository || expectedHeadOwner);
+  const prHasHeadIdentity = Boolean(prHeadRepository || prHeadOwner);
 
   if (headContext.isCrossRepository) {
     if (pr.isCrossRepository === false) {
       return false;
     }
-    if ((expectedHeadRepository || expectedHeadOwner) && !prHeadRepository && !prHeadOwner) {
+    if (expectsHeadIdentity && !prHasHeadIdentity) {
       return false;
     }
-    if (expectedHeadRepository && prHeadRepository && expectedHeadRepository !== prHeadRepository) {
+  } else if (pr.isCrossRepository === true) {
+    // In fork clones, the tracked branch often points at origin/<branch> while
+    // gh defaults to listing PRs against the upstream repository. Accept those
+    // PRs when the reported head repo still matches the tracked branch remote.
+    if (!expectsHeadIdentity || !prHasHeadIdentity) {
       return false;
     }
-    if (expectedHeadOwner && prHeadOwner && expectedHeadOwner !== prHeadOwner) {
-      return false;
-    }
-    return true;
-  }
-
-  if (pr.isCrossRepository === true) {
-    return false;
   }
   if (expectedHeadRepository && prHeadRepository && expectedHeadRepository !== prHeadRepository) {
     return false;

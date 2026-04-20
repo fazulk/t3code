@@ -28,7 +28,8 @@ const GitHubPullRequestSchema = Schema.Struct({
   headRepository: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
-        nameWithOwner: Schema.String,
+        nameWithOwner: Schema.optional(Schema.String),
+        name: Schema.optional(Schema.String),
       }),
     ),
   ),
@@ -44,6 +45,17 @@ const GitHubPullRequestSchema = Schema.Struct({
 function trimOptionalString(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseRepositoryOwnerLogin(nameWithOwner: string | null): string | null {
+  const trimmed = nameWithOwner?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const [ownerLogin] = trimmed.split("/");
+  const normalizedOwnerLogin = ownerLogin?.trim() ?? "";
+  return normalizedOwnerLogin.length > 0 ? normalizedOwnerLogin : null;
 }
 
 function normalizeGitHubPullRequestState(input: {
@@ -66,11 +78,15 @@ function normalizeGitHubPullRequestState(input: {
 function normalizeGitHubPullRequestRecord(
   raw: Schema.Schema.Type<typeof GitHubPullRequestSchema>,
 ): NormalizedGitHubPullRequestRecord {
-  const headRepositoryNameWithOwner = trimOptionalString(raw.headRepository?.nameWithOwner);
+  const explicitHeadRepositoryNameWithOwner = trimOptionalString(raw.headRepository?.nameWithOwner);
+  const headRepositoryName = trimOptionalString(raw.headRepository?.name);
   const headRepositoryOwnerLogin =
     trimOptionalString(raw.headRepositoryOwner?.login) ??
-    (typeof headRepositoryNameWithOwner === "string" && headRepositoryNameWithOwner.includes("/")
-      ? (headRepositoryNameWithOwner.split("/")[0] ?? null)
+    parseRepositoryOwnerLogin(explicitHeadRepositoryNameWithOwner);
+  const headRepositoryNameWithOwner =
+    explicitHeadRepositoryNameWithOwner ??
+    (headRepositoryName && headRepositoryOwnerLogin
+      ? `${headRepositoryOwnerLogin}/${headRepositoryName}`
       : null);
 
   return {

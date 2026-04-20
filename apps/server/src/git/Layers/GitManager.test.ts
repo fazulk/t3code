@@ -712,6 +712,62 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect(
+    "status accepts gh PR payloads that only include head repository name",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        yield* runGit(repoDir, ["checkout", "-b", "t3code/embed-flow-iframe"]);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "t3code/embed-flow-iframe"]);
+        yield* runGit(repoDir, [
+          "config",
+          "remote.origin.url",
+          "git@github.com:thecvlb/stardust-front-end.git",
+        ]);
+        yield* runGit(repoDir, ["config", "remote.origin.pushurl", remoteDir]);
+
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            prListSequence: [
+              JSON.stringify([
+                {
+                  number: 1808,
+                  title: "Add iframe embed flow support",
+                  url: "https://github.com/thecvlb/stardust-front-end/pull/1808",
+                  baseRefName: "main",
+                  headRefName: "t3code/embed-flow-iframe",
+                  state: "OPEN",
+                  updatedAt: "2026-04-18T22:58:49Z",
+                  isCrossRepository: false,
+                  headRepository: {
+                    name: "stardust-front-end",
+                  },
+                  headRepositoryOwner: {
+                    login: "thecvlb",
+                  },
+                },
+              ]),
+            ],
+          },
+        });
+
+        const status = yield* manager.status({ cwd: repoDir });
+
+        expect(status.pr).toEqual({
+          number: 1808,
+          title: "Add iframe embed flow support",
+          url: "https://github.com/thecvlb/stardust-front-end/pull/1808",
+          baseBranch: "main",
+          headBranch: "t3code/embed-flow-iframe",
+          state: "open",
+        });
+      }),
+    20_000,
+  );
+
   it.effect("status trims PR metadata returned by gh before publishing it", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -975,6 +1031,74 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         expect(status.branch).toBe("main");
         expect(status.pr).toBeNull();
       }),
+  );
+
+  it.effect(
+    "status detects fork PRs when the tracked origin remote is the fork",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const originDir = yield* createBareRemote();
+        const upstreamDir = yield* createBareRemote();
+        yield* configureRemote(repoDir, "origin", originDir, "origin");
+        yield* configureRemote(repoDir, "upstream", upstreamDir, "upstream");
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(repoDir, ["push", "-u", "upstream", "main"]);
+        yield* runGit(repoDir, ["checkout", "-b", "t3code/fix-pr-url-detection"]);
+        fs.writeFileSync(path.join(repoDir, "fork-origin-pr.txt"), "fork origin pr\n");
+        yield* runGit(repoDir, ["add", "fork-origin-pr.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Fork origin PR branch"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "t3code/fix-pr-url-detection"]);
+        yield* runGit(repoDir, ["config", "remote.origin.url", "git@github.com:fazulk/t3code.git"]);
+        yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
+        yield* runGit(repoDir, [
+          "config",
+          "remote.upstream.url",
+          "git@github.com:pingdotgg/t3code.git",
+        ]);
+        yield* runGit(repoDir, ["config", "remote.upstream.pushurl", upstreamDir]);
+
+        const { manager, ghCalls } = yield* makeManager({
+          ghScenario: {
+            prListSequence: [
+              JSON.stringify([
+                {
+                  number: 2232,
+                  title: "fix: detect PR URL from fork origin",
+                  url: "https://github.com/pingdotgg/t3code/pull/2232",
+                  baseRefName: "main",
+                  headRefName: "t3code/fix-pr-url-detection",
+                  state: "OPEN",
+                  updatedAt: "2026-04-20T12:00:00Z",
+                  isCrossRepository: true,
+                  headRepository: {
+                    nameWithOwner: "fazulk/t3code",
+                  },
+                  headRepositoryOwner: {
+                    login: "fazulk",
+                  },
+                },
+              ]),
+            ],
+          },
+        });
+
+        const status = yield* manager.status({ cwd: repoDir });
+        expect(status.branch).toBe("t3code/fix-pr-url-detection");
+        expect(status.pr).toEqual({
+          number: 2232,
+          title: "fix: detect PR URL from fork origin",
+          url: "https://github.com/pingdotgg/t3code/pull/2232",
+          baseBranch: "main",
+          headBranch: "t3code/fix-pr-url-detection",
+          state: "open",
+        });
+        expect(ghCalls).toContain(
+          "pr list --head t3code/fix-pr-url-detection --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+        );
+      }),
+    20_000,
   );
 
   it.effect(

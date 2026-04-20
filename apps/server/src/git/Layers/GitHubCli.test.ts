@@ -76,6 +76,53 @@ layer("GitHubCliLive", (it) => {
     }),
   );
 
+  it.effect("parses pull request view output when gh omits nameWithOwner", () =>
+    Effect.gen(function* () {
+      mockedRunProcess.mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 1808,
+          title: "Add iframe embed flow support",
+          url: "https://github.com/thecvlb/stardust-front-end/pull/1808",
+          baseRefName: "main",
+          headRefName: "t3code/embed-flow-iframe",
+          state: "OPEN",
+          mergedAt: null,
+          isCrossRepository: false,
+          headRepository: {
+            name: "stardust-front-end",
+          },
+          headRepositoryOwner: {
+            login: "thecvlb",
+          },
+        }),
+        stderr: "",
+        code: 0,
+        signal: null,
+        timedOut: false,
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const gh = yield* GitHubCli;
+        return yield* gh.getPullRequest({
+          cwd: "/repo",
+          reference: "#1808",
+        });
+      });
+
+      assert.deepStrictEqual(result, {
+        number: 1808,
+        title: "Add iframe embed flow support",
+        url: "https://github.com/thecvlb/stardust-front-end/pull/1808",
+        baseRefName: "main",
+        headRefName: "t3code/embed-flow-iframe",
+        state: "open",
+        isCrossRepository: false,
+        headRepositoryNameWithOwner: "thecvlb/stardust-front-end",
+        headRepositoryOwnerLogin: "thecvlb",
+      });
+    }),
+  );
+
   it.effect("trims pull request fields decoded from gh json", () =>
     Effect.gen(function* () {
       mockedRunProcess.mockResolvedValueOnce({
@@ -170,6 +217,57 @@ layer("GitHubCliLive", (it) => {
           baseRefName: "main",
           headRefName: "feature/pr-list",
           state: "open",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("parses pr list entries when gh omits nameWithOwner", () =>
+    Effect.gen(function* () {
+      mockedRunProcess.mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 1808,
+            title: "Add iframe embed flow support",
+            url: "https://github.com/thecvlb/stardust-front-end/pull/1808",
+            baseRefName: "main",
+            headRefName: "t3code/embed-flow-iframe",
+            state: "OPEN",
+            mergedAt: null,
+            isCrossRepository: false,
+            headRepository: {
+              name: "stardust-front-end",
+            },
+            headRepositoryOwner: {
+              login: "thecvlb",
+            },
+          },
+        ]),
+        stderr: "",
+        code: 0,
+        signal: null,
+        timedOut: false,
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const gh = yield* GitHubCli;
+        return yield* gh.listOpenPullRequests({
+          cwd: "/repo",
+          headSelector: "t3code/embed-flow-iframe",
+        });
+      });
+
+      assert.deepStrictEqual(result, [
+        {
+          number: 1808,
+          title: "Add iframe embed flow support",
+          url: "https://github.com/thecvlb/stardust-front-end/pull/1808",
+          baseRefName: "main",
+          headRefName: "t3code/embed-flow-iframe",
+          state: "open",
+          isCrossRepository: false,
+          headRepositoryNameWithOwner: "thecvlb/stardust-front-end",
+          headRepositoryOwnerLogin: "thecvlb",
         },
       ]);
     }),
