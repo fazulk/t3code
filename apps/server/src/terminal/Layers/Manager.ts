@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   DEFAULT_TERMINAL_ID,
   type TerminalEvent,
+  type TerminalProcessLaunch,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
 } from "@t3tools/contracts";
@@ -90,6 +91,7 @@ interface TerminalStartInput {
   cols: number;
   rows: number;
   env?: Record<string, string>;
+  launch?: TerminalProcessLaunch;
 }
 
 interface TerminalSessionState {
@@ -1348,6 +1350,29 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       return yield* trySpawn(shellCandidates, spawnEnv, session, index + 1, spawnError);
     });
 
+    const spawnLaunch = Effect.fn("terminal.spawnLaunch")(function* (
+      launch: TerminalProcessLaunch,
+      spawnEnv: NodeJS.ProcessEnv,
+      session: TerminalSessionState,
+    ): Effect.fn.Return<{ process: PtyProcess; shellLabel: string }, PtySpawnError> {
+      const process = yield* options.ptyAdapter.spawn({
+        shell: launch.executable,
+        args: [...launch.args],
+        cwd: session.cwd,
+        cols: session.cols,
+        rows: session.rows,
+        env: spawnEnv,
+      });
+
+      return {
+        process,
+        shellLabel:
+          launch.args.length > 0
+            ? `${launch.executable} ${launch.args.join(" ")}`
+            : launch.executable,
+      };
+    });
+
     const startSession = Effect.fn("terminal.startSession")(function* (
       session: TerminalSessionState,
       input: TerminalStartInput,
@@ -1384,9 +1409,14 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
               const terminalEnv = createTerminalSpawnEnv(baseEnv, session.runtimeEnv);
-              const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
+              const spawnResult = input.launch
+                ? yield* spawnLaunch(input.launch, terminalEnv, session)
+                : yield* trySpawn(
+                    resolveShellCandidates(shellResolver, platform, baseEnv),
+                    terminalEnv,
+                    session,
+                  );
               ptyProcess = spawnResult.process;
               startedShell = spawnResult.shellLabel;
 
@@ -1671,6 +1701,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 cols,
                 rows,
                 ...(input.env ? { env: input.env } : {}),
+                ...(input.launch ? { launch: input.launch } : {}),
               },
               "started",
             );
@@ -1725,6 +1756,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 cols: targetCols,
                 rows: targetRows,
                 ...(input.env ? { env: input.env } : {}),
+                ...(input.launch ? { launch: input.launch } : {}),
               },
               "started",
             );
@@ -1865,6 +1897,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               cols,
               rows,
               ...(input.env ? { env: input.env } : {}),
+              ...(input.launch ? { launch: input.launch } : {}),
             },
             "restarted",
           );

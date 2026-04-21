@@ -154,8 +154,29 @@ export const ProjectScriptIcon = Schema.Literals([
   "configure",
   "build",
   "debug",
+  "agent",
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
+
+export const AgentActionProvider = Schema.Literals(["codex", "claudeAgent"]);
+export type AgentActionProvider = typeof AgentActionProvider.Type;
+
+const CodexAgentActionConfig = Schema.Struct({
+  provider: Schema.Literal("codex"),
+  modelSelection: CodexModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
+
+const ClaudeAgentActionConfig = Schema.Struct({
+  provider: Schema.Literal("claudeAgent"),
+  modelSelection: ClaudeModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
+
+export const AgentActionConfig = Schema.Union([CodexAgentActionConfig, ClaudeAgentActionConfig]);
+export type AgentActionConfig = typeof AgentActionConfig.Type;
 
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -163,6 +184,7 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  agentConfig: Schema.optionalKey(AgentActionConfig),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

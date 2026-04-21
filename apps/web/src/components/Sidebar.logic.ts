@@ -6,7 +6,7 @@ import {
   toSortableTimestamp,
   type ThreadSortInput,
 } from "../lib/threadSort";
-import type { SidebarThreadSummary, Thread } from "../types";
+import type { Project, SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
 
@@ -211,6 +211,18 @@ export function resolveSidebarNewThreadSeedContext(input: {
   return {
     envMode: input.defaultEnvMode,
   };
+}
+
+export function resolveSidebarProjectGitHubUrl(
+  project: Pick<Project, "repositoryIdentity">,
+): string | null {
+  const repositoryIdentity = project.repositoryIdentity;
+  if (repositoryIdentity?.provider !== "github") {
+    return null;
+  }
+
+  const canonicalKey = repositoryIdentity.canonicalKey?.trim();
+  return canonicalKey ? `https://${canonicalKey}` : null;
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {

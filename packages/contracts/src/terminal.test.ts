@@ -78,6 +78,24 @@ describe("TerminalOpenInput", () => {
     expect(parsed.worktreePath).toBe("/tmp/project/.t3/worktrees/feature-a");
   });
 
+  it("accepts optional process launch details", () => {
+    const parsed = decodeSync(TerminalOpenInput, {
+      threadId: "thread-1",
+      cwd: "/tmp/project",
+      cols: 100,
+      rows: 24,
+      launch: {
+        executable: "codex",
+        args: ["exec", "--model", "gpt-5.4"],
+      },
+    });
+
+    expect(parsed.launch).toEqual({
+      executable: "codex",
+      args: ["exec", "--model", "gpt-5.4"],
+    });
+  });
+
   it("rejects invalid env keys", () => {
     expect(
       decodes(TerminalOpenInput, {

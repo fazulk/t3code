@@ -15,6 +15,7 @@ import {
   TerminalHistoryError,
   TerminalNotRunningError,
   TerminalOpenInput,
+  type TerminalProcessLaunch,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
@@ -62,6 +63,7 @@ export interface ShellCandidate {
 export interface TerminalStartInput extends TerminalOpenInput {
   cols: number;
   rows: number;
+  launch?: TerminalProcessLaunch;
 }
 
 /**

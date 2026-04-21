@@ -1,14 +1,16 @@
 import {
+  type ServerProvider,
   type EnvironmentId,
   type EditorId,
-  type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
+import { type AgentActionDefaults } from "~/lib/agentActionDefaults";
 import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -16,6 +18,7 @@ import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScr
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
+import { type ScopedProjectScript } from "~/scopedProjectScripts";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -25,9 +28,12 @@ interface ChatHeaderProps {
   activeProjectName: string | undefined;
   isGitRepo: boolean;
   openInCwd: string | null;
-  activeProjectScripts: ProjectScript[] | undefined;
+  activeProjectScripts: ScopedProjectScript[] | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
+  providerStatuses: ReadonlyArray<ServerProvider>;
+  settings: UnifiedSettings;
+  agentActionDefaults: AgentActionDefaults;
   availableEditors: ReadonlyArray<EditorId>;
   terminalAvailable: boolean;
   terminalOpen: boolean;
@@ -35,7 +41,7 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
-  onRunProjectScript: (script: ProjectScript) => void;
+  onRunProjectScript: (script: ScopedProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
@@ -54,6 +60,9 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectScripts,
   preferredScriptId,
   keybindings,
+  providerStatuses,
+  settings,
+  agentActionDefaults,
   availableEditors,
   terminalAvailable,
   terminalOpen,
@@ -94,6 +103,9 @@ export const ChatHeader = memo(function ChatHeader({
           <ProjectScriptsControl
             scripts={activeProjectScripts}
             keybindings={keybindings}
+            providerStatuses={providerStatuses}
+            settings={settings}
+            agentActionDefaults={agentActionDefaults}
             preferredScriptId={preferredScriptId}
             onRunScript={onRunProjectScript}
             onAddScript={onAddProjectScript}
