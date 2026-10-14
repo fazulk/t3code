@@ -566,6 +566,7 @@ it.effect("registers native issue choices and guards reads and typed creation wi
           validateRead({
             ...entry,
             writable: true,
+            viewer: null,
             capabilities: {
               create: true,
               edit: true,
