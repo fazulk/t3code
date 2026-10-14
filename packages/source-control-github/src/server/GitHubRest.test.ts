@@ -10,10 +10,12 @@ import { ChildProcessSpawner } from "effect/process";
 import { VcsProcessSpawnError, VcsProcessTimeoutError } from "@t3tools/contracts";
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from "effect/http";
 
+import * as GitHubApi from "./GitHubApi.ts";
 import * as GitHubRest from "./GitHubRest.ts";
 import * as GitHubRequestPolicy from "./GitHubRequestPolicy.ts";
 import * as GitHubCredentials from "./GitHubCredentials.ts";
 import * as GitHubQuota from "./GitHubQuota.ts";
+import * as GitHubIssueTracker from "./GitHubIssueTracker.ts";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 import type * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
 import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
@@ -52,7 +54,8 @@ function harness(respond: (request: HttpClientRequest.HttpClientRequest) => Resp
       return Effect.succeed(HttpClientResponse.fromWeb(request, respond(request)));
     }),
   );
-  const layer = GitHubRest.layer.pipe(
+  const layer = GitHubApi.layer.pipe(
+    Layer.provideMerge(GitHubRest.layer),
     Layer.provide(Layer.mergeAll(credentials, http)),
     Layer.provideMerge(GitHubQuota.layer),
     Layer.provideMerge(SourceControlRateLimit.layer),
@@ -106,6 +109,111 @@ describe("environmentToken", () => {
 });
 
 describe("GitHubRest", () => {
+  it.effect.each(["update", "setState", "comment", "setReaction", "create"] as const)(
+    "keeps permission preflight and %s interactive while background reads pause",
+    (operation) => {
+      const reset = Math.floor(NOW / 1000) + 600;
+      const { layer, requests } = harness((request) => {
+        const graphql = request.url.endsWith("/graphql");
+        const headers = {
+          "x-ratelimit-resource": graphql ? "graphql" : "core",
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "499",
+          "x-ratelimit-reset": String(reset),
+        };
+        return json(
+          graphql
+            ? {
+                data: {
+                  repository: {
+                    viewerPermission: "WRITE",
+                    issue: { id: "I_42", viewerCanUpdate: true },
+                  },
+                },
+              }
+            : {
+                number: 43,
+                html_url: "https://github.com/acme/web/issues/43",
+              },
+          { headers },
+        );
+      });
+      return Effect.gen(function* () {
+        yield* TestClock.setTime(NOW);
+        const api = yield* GitHubApi.GitHubApi;
+        yield* api.rest({ host: "github.com", operation: "seed", path: "rate_limit" });
+        yield* api.graphql({
+          host: "github.com",
+          operation: "seed",
+          query: "query { viewer { id } }",
+        });
+        const driver = yield* GitHubIssueTracker.make;
+        const target = { cwd: "/w", host: "github.com", scope: "acme/web", key: "42" };
+        expect((yield* driver.getViewerPermissions!(target)).edit).toBe(true);
+        if (operation === "update") yield* driver.update!({ ...target, title: "Changed" });
+        else if (operation === "setState") yield* driver.setState!({ ...target, state: "closed" });
+        else if (operation === "comment") yield* driver.comment!({ ...target, body: "New" });
+        else if (operation === "setReaction")
+          yield* driver.setReaction!({ ...target, content: "thumbs-up", reacted: true });
+        else if (operation === "create")
+          yield* driver.create!({
+            ...target,
+            title: "New",
+            body: "",
+            labels: [],
+            assignees: [],
+          });
+        const writes = requests.slice(3);
+        expect(writes).toHaveLength(operation === "setReaction" ? 2 : 1);
+        expect(writes.some((request) => request.method !== "GET")).toBe(true);
+        const count = requests.length;
+        expect(
+          (yield* Effect.flip(
+            driver.listIssues({
+              ...target,
+              state: "all",
+              involvement: "all",
+              viewer: "julius",
+              limit: 10,
+            }),
+          )).reason,
+        ).toBe("rate-limited");
+        expect((yield* Effect.flip(driver.getIssue(target))).reason).toBe("rate-limited");
+        expect(requests).toHaveLength(count);
+        expect(yield* SourceControlRateLimit.Interactive).toBe(false);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
+  it.effect("keeps native rate refusals typed during interactive issue writes", () => {
+    const reset = Math.floor(NOW / 1000) + 600;
+    const { layer, requests } = harness((request) =>
+      request.url.endsWith("/graphql")
+        ? json({
+            data: { repository: { viewerPermission: "WRITE", issue: { viewerCanUpdate: true } } },
+          })
+        : json(
+            { message: "API rate limit exceeded" },
+            {
+              status: 429,
+              headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) },
+            },
+          ),
+    );
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      const driver = yield* GitHubIssueTracker.make;
+      const target = { cwd: "/w", host: "github.com", scope: "acme/web", key: "42" };
+      expect((yield* driver.getViewerPermissions!(target)).edit).toBe(true);
+      const refused = yield* Effect.flip(driver.update!({ ...target, title: "Changed" }));
+      expect(refused).toMatchObject({ reason: "rate-limited", retryAt: reset * 1000 });
+      expect(refused.cause).toMatchObject({ _tag: "GitHubApiRateLimitError" });
+      expect(requests[1]?.method).toBe("PATCH");
+      expect((yield* Effect.flip(driver.getIssue(target))).reason).toBe("rate-limited");
+      expect(requests).toHaveLength(2);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("traces the operation, path and quota, never the query string or the token", () => {
     const spans: Array<Tracer.NativeSpan> = [];
     const tracer = Tracer.make({
