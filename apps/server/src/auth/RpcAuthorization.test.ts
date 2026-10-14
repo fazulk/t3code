@@ -129,6 +129,7 @@ describe("RPC authorization scopes", () => {
     for (const method of [
       WS_METHODS.issuesList,
       WS_METHODS.issuesDetail,
+      WS_METHODS.issuesResolveUrl,
       WS_METHODS.issuesComments,
       WS_METHODS.issuesTemplates,
       WS_METHODS.issuesCandidates,
