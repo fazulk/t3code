@@ -63,7 +63,6 @@ import type {
   ViewerPermissions,
 } from "./pullRequestReads.graphql.ts";
 import type {
-  ReactionGroup,
   ReviewDismissals,
   ReviewThreadComments,
   ReviewThreads,
@@ -157,6 +156,21 @@ function nodesOf<A>(
   return (connection?.nodes ?? []).flatMap((node) => (node === null ? [] : [node]));
 }
 
+const REACTORS_PER_GROUP = 10;
+export const REACTION_GROUPS_FIELDS = `reactionGroups {
+  content
+  viewerHasReacted
+  reactors(first: ${REACTORS_PER_GROUP}) {
+    totalCount
+    nodes {
+      ... on User { login }
+      ... on Bot { login }
+      ... on Organization { login }
+      ... on Mannequin { login }
+    }
+  }
+}`;
+
 const REACTION_CONTENT_BY_GITHUB: Readonly<Record<string, PullRequestReactionContent>> = {
   THUMBS_UP: "thumbs-up",
   THUMBS_DOWN: "thumbs-down",
@@ -187,14 +201,43 @@ export function gitHubReactionContent(
   return GITHUB_REACTION_BY_CONTENT[content];
 }
 
+export const RawReactionGroupsSchema = Schema.optional(
+  Schema.NullOr(
+    Schema.Array(
+      Schema.Struct({
+        content: Schema.optional(Schema.NullOr(Schema.String)),
+        viewerHasReacted: Schema.optional(Schema.Boolean),
+        reactors: Schema.optional(
+          Schema.NullOr(
+            Schema.Struct({
+              totalCount: Schema.optional(Schema.Int),
+              nodes: Schema.optional(
+                Schema.NullOr(
+                  Schema.Array(
+                    Schema.NullOr(
+                      Schema.Struct({ login: Schema.optional(Schema.NullOr(Schema.String)) }),
+                    ),
+                  ),
+                ),
+              ),
+            }),
+          ),
+        ),
+      }),
+    ),
+  ),
+);
+
+type RawReactionGroups = typeof RawReactionGroupsSchema.Type;
+
 /**
  * The groups GitHub answered with, as the contract carries them. A group with nobody behind it is
  * dropped: GitHub answers with a group per content it knows, including the ones nobody chose. The
  * viewer's own login is left out of `actors` — the page names them "You" instead, and leaving it
  * in would name them twice — but `count` still counts them along with everyone else.
  */
-function toReactions(
-  groups: ReadonlyArray<ReactionGroup> | null | undefined,
+export function toReactions(
+  groups: RawReactionGroups,
   viewer: string | null,
 ): ReadonlyArray<PullRequestReaction> {
   const normalizedViewer = viewer?.toLowerCase() ?? null;
@@ -205,13 +248,13 @@ function toReactions(
     const logins = nodesOf(group.reactors).flatMap((node) =>
       "login" in node ? (trimmed(node.login) ?? []) : [],
     );
-    const count = Math.max(group.reactors.totalCount, logins.length);
+    const count = Math.max(group.reactors?.totalCount ?? 0, logins.length);
     if (count <= 0) continue;
     const actors =
       normalizedViewer === null
         ? logins
         : logins.filter((login) => login.toLowerCase() !== normalizedViewer);
-    reactions.push({ content, count, actors, viewerHasReacted: group.viewerHasReacted });
+    reactions.push({ content, count, actors, viewerHasReacted: group.viewerHasReacted ?? false });
   }
   return reactions;
 }
@@ -1853,3 +1896,11 @@ export function decodePullRequestStacksJson(
     })),
   });
 }
+
+export const ADD_REACTION_GRAPHQL_MUTATION = `mutation($subjectId: ID!, $content: ReactionContent!) {
+  addReaction(input: { subjectId: $subjectId, content: $content }) { reaction { content } }
+}`;
+
+export const REMOVE_REACTION_GRAPHQL_MUTATION = `mutation($subjectId: ID!, $content: ReactionContent!) {
+  removeReaction(input: { subjectId: $subjectId, content: $content }) { reaction { content } }
+}`;
