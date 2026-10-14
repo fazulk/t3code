@@ -3116,6 +3116,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 scope: command.scope.trim(),
                 key: command.key.trim(),
                 projectId: command.projectId,
+                linkId: command.commandId,
                 url: command.url,
                 source: command.source,
                 linkedAt: DateTime.formatIso(now),
@@ -3126,7 +3127,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             if (!existing) return thread;
             issues = links.filter((link) => link !== existing);
           } else {
-            if (!existing) return thread;
+            if (
+              !existing ||
+              (command.linkedAt !== undefined && command.linkedAt !== existing.linkedAt) ||
+              (command.linkId !== undefined && command.linkId !== (existing.linkId ?? null))
+            )
+              return thread;
             issues = links.map((link) =>
               link === existing ? { ...link, snapshot: command.snapshot } : link,
             );

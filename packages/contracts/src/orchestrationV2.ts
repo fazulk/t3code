@@ -2735,6 +2735,8 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     ...ThreadIssueKey.fields,
     snapshot: ThreadIssueSnapshot,
+    linkedAt: Schema.optional(ThreadIssueLink.fields.linkedAt),
+    linkId: Schema.optional(Schema.NullOr(CommandId)),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.watch"),
