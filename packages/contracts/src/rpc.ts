@@ -1947,7 +1947,27 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
-export const WsRpcGroup = RpcGroup.make(
+/**
+ * Issue RPCs form their own group so the server implements them in a separate
+ * handler layer. A single `toLayer` over every WebSocket RPC hits TypeScript's
+ * instantiation depth limit near 200 RPCs, and the server's requirements then
+ * silently become `any`. Add new domains as groups merged into `WsRpcGroup`.
+ */
+export const WsIssuesRpcGroup = RpcGroup.make(
+  WsIssuesListRpc,
+  WsIssuesDetailRpc,
+  WsIssuesCommentsRpc,
+  WsIssuesTemplatesRpc,
+  WsIssuesCandidatesRpc,
+  WsIssuesCreateRpc,
+  WsIssuesCommentRpc,
+  WsIssuesUpdateRpc,
+  WsIssuesSetStateRpc,
+  WsIssuesReactRpc,
+).middleware(RpcScopeAuthorization);
+
+/** Every WebSocket RPC not in a domain group merged into `WsRpcGroup` below. */
+export const WsCoreRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -2046,16 +2066,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsRequestReviewersRpc,
   WsPullRequestsLabelCandidatesRpc,
   WsPullRequestsSetLabelsRpc,
-  WsIssuesListRpc,
-  WsIssuesDetailRpc,
-  WsIssuesCommentsRpc,
-  WsIssuesTemplatesRpc,
-  WsIssuesCandidatesRpc,
-  WsIssuesCreateRpc,
-  WsIssuesCommentRpc,
-  WsIssuesUpdateRpc,
-  WsIssuesSetStateRpc,
-  WsIssuesReactRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
@@ -2154,3 +2164,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
 ).middleware(RpcScopeAuthorization);
+
+export const WsRpcGroup = WsCoreRpcGroup.merge(WsIssuesRpcGroup);
