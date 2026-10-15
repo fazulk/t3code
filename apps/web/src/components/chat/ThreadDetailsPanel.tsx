@@ -144,6 +144,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   onDeleteScript={props.onDeleteProjectScript}
                 />
               ) : null}
+
+              {!props.gitCwd || !props.isGitRepo ? (
+                <ThreadDetailsIssueRows threadRef={activeThreadRef} />
+              ) : null}
             </div>
           </ThreadDetailsSection>
 
@@ -170,10 +174,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 ) : null}
               </div>
             </ThreadDetailsSection>
-          ) : null}
-
-          {!props.gitCwd || !props.isGitRepo ? (
-            <ThreadDetailsIssueRows threadRef={activeThreadRef} />
           ) : null}
 
           {density === "full" && !props.draftId ? (
