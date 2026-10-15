@@ -2321,6 +2321,9 @@ function useChatMarkdownState({
     [createAssetUrl, cwd, expandMedia, preparedConnection, threadRef],
   );
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  const pullRequestServerConfig = useAtomValue(
+    serverEnvironment.configValueAtom(explicitEnvironmentId ?? environmentId),
+  );
   const projects = useProjects();
   const availableEditors = serverConfig?.availableEditors ?? [];
   const [preferredEditor] = usePreferredEditor(availableEditors);
@@ -2669,7 +2672,7 @@ function useChatMarkdownState({
       linkedThreadPullRequestFor,
       resolveThreadPullRequest,
       resolvedTheme,
-      serverConfig,
+      pullRequestServerConfig,
       skills,
       text,
       threadRef,
@@ -2704,7 +2707,7 @@ function useChatMarkdownState({
       linkedThreadPullRequestFor,
       resolveThreadPullRequest,
       resolvedTheme,
-      serverConfig,
+      pullRequestServerConfig,
       skills,
       text,
       threadRef,
@@ -2849,7 +2852,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       projects,
       linkedThreadPullRequestFor,
       resolveThreadPullRequest,
-      serverConfig,
+      pullRequestServerConfig,
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
@@ -2896,11 +2899,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
       const confirmBeforeOpen = pullRequestAutolink === "reference";
       const pullRequestCandidateUrl =
         confirmBeforeOpen && href ? pullRequestCandidateUrlFromReferenceAutolink(href) : href;
+      const pullRequestEnvironmentId = explicitEnvironmentId ?? environmentId;
       const pullRequestPreviewTarget = pullRequestCandidateUrl
         ? resolvePullRequestPreviewTarget({
-            environmentId,
+            environmentId: pullRequestEnvironmentId,
             projects,
-            pullRequestsEnabled: serverConfig?.environment.capabilities.pullRequests === true,
+            pullRequestsEnabled:
+              pullRequestServerConfig?.environment.capabilities.pullRequests === true,
             url: pullRequestCandidateUrl,
           })
         : null;
@@ -2947,7 +2952,12 @@ const CHAT_MARKDOWN_COMPONENTS = {
             }
             if (
               !href ||
-              openChangeRequestLink(event, href, undefined, environmentId ?? undefined) ||
+              openChangeRequestLink(
+                event,
+                href,
+                undefined,
+                pullRequestEnvironmentId ?? undefined,
+              ) ||
               openIssueLink(event, href, explicitEnvironmentId ?? environmentId ?? undefined)
             ) {
               return;
@@ -3071,7 +3081,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 },
                 targetUrl,
                 undefined,
-                environmentId ?? undefined,
+                pullRequestEnvironmentId ?? undefined,
               )
             }
             onOpenFallback={openDeferredMarkdownLink}
