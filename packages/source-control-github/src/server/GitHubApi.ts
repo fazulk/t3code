@@ -93,7 +93,11 @@ export const make = Effect.gen(function* () {
           if (body.truncated) return { _tag: "Failed", ...meta } as const;
           const errors = Option.getOrUndefined(decodeErrors(body.text))?.errors;
           if (
-            GitHubRequestPolicy.isRateLimited({ ...meta, body: body.text, graphqlErrors: errors })
+            GitHubRequestPolicy.isRateLimited({
+              ...meta,
+              body: body.text,
+              ...(errors === undefined ? {} : { graphqlErrors: errors }),
+            })
           ) {
             return { _tag: "RateLimited", ...meta } as const;
           }
