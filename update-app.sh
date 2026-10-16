@@ -42,12 +42,16 @@ The invoking terminal's directory is the checkout; keep working in it.
 1. Preflight: require macOS, a clean working tree (including untracked files),
    a feature branch, and no unfinished rebase, merge, or cherry-pick. Stop and
    explain any blocker. Do not commit, stash, reset, or discard existing work.
-   Record the starting branch and commit; create a uniquely named local backup
-   branch before changing history. Do not create a pull request.
+   Record the starting branch and commit. Use backup/update-app/<starting-branch>
+   as the single rotating backup branch, locally and on origin; reuse it on
+   every update rather than creating dated branches. Do not create a pull request.
    Confirm origin points to https://github.com/fazulk/t3code.git (the SSH
    equivalent is fine), then fetch the starting branch from origin. Record its
    exact remote commit before rebasing, and require it to be an ancestor of the
    starting local commit; otherwise stop rather than overwrite remote work.
+   Record the exact remote backup commit too (or its absence). Before
+   changing history, create or replace the local backup at the starting local
+   commit. Stop if the backup is checked out in another worktree.
 
 2. The true upstream is https://github.com/pingdotgg/t3code.git. Confirm the
    upstream remote points there (the SSH equivalent is fine); stop if it does
@@ -79,9 +83,11 @@ The invoking terminal's directory is the checkout; keep working in it.
    stop and report it; do not install an older artifact or make unrelated fixes.
 
 4. After the build succeeds, publish the rebased starting branch to origin.
-   First preserve the recorded remote commit under a uniquely named remote
-   backup branch. Then push HEAD explicitly to refs/heads/<starting-branch>
-   using --force-with-lease=refs/heads/<starting-branch>:<recorded-remote-commit>.
+   In one atomic push, replace the rotating remote backup with the recorded
+   remote starting commit and push HEAD to refs/heads/<starting-branch>.
+   Use --force-with-lease=refs/heads/<starting-branch>:<recorded-remote-commit>
+   and an explicit lease for the backup ref using its recorded commit (an empty
+   expected value if it did not exist). If atomic push is unsupported, stop.
    Never use plain --force or refresh the expected commit to bypass rejection.
    If the lease fails, stop and explain that the remote changed. Verify the
    remote branch matches HEAD. Do not push main or upstream. Report the remote
