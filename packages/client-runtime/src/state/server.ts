@@ -1325,6 +1325,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:run-now",
       tag: WS_METHODS.scheduledTasksRunNow,
     }),
+    // Off the config lane for the same reason as run-now: it waits on the launch.
+    runGlobalAction: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:global-action:run",
+      tag: WS_METHODS.globalActionsRun,
+    }),
     rotateScheduledTaskWebhookToken: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:rotate-webhook-token",
       tag: WS_METHODS.scheduledTasksRotateWebhookToken,

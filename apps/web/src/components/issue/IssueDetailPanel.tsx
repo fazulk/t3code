@@ -95,6 +95,7 @@ import {
   type IssueOlderComments,
   type IssuePickerConfirmed,
 } from "./issueDetail.logic";
+import { IssueLinkedThreads, IssueStartThreadMenu } from "./IssueThreads";
 
 /**
  * Links or unlinks the issue to the thread it is shown beside. Dispatches the orchestration
@@ -816,6 +817,7 @@ export function IssueDetailPanel({
               {issueDisplayLabel(detail.scope, detail.displayKey)}
             </span>
             {stateControl}
+            <IssueStartThreadMenu environmentId={environmentId} detail={detail} />
             {threadRef ? (
               <IssueThreadLinkButton
                 environmentId={environmentId}
@@ -1022,6 +1024,8 @@ export function IssueDetailPanel({
               />
             ) : null}
           </section>
+
+          <IssueLinkedThreads environmentId={environmentId} detail={detail} />
 
           {detail.linkedPullRequests.length > 0 ? (
             <section className="flex flex-col gap-1">

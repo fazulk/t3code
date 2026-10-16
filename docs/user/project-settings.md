@@ -131,6 +131,19 @@ itself, or **Skip** to leave them for a setup script. It resolves in the same or
 workspace default: a `"worktreeSubmodules"` value in the `t3.json` of the branch being checked out
 applies when the project and environment are both on **Inherit**.
 
+## Global actions
+
+Global actions are saved prompts that appear under **Global actions** in every project's actions
+menu, which is handy for running a skill like `/review` anywhere. Add them from that menu or from
+**Settings → General**; they belong to the machine, so every project on it shares them.
+
+Each action runs in the current thread or starts a new thread in that project. With **Auto submit**
+on, the prompt is sent right away; a current-thread prompt is queued behind any running turn and
+leaves what you've typed alone. With it off, the prompt waits in the composer for you to edit and
+send. A new thread uses the action's model if it has one, otherwise the current thread's, and the
+project's default workspace unless the action picks its own. A new worktree branches from the
+project checkout's current branch.
+
 ## Worktree location
 
 New worktrees go in the `worktrees` folder of the T3 home directory. To put them somewhere else,

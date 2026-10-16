@@ -98,10 +98,13 @@ function Header(props: { readonly gitStatus: VcsStatusResult | null; readonly ti
         canOperateTerminal: true,
         canOpenFiles: true,
         projectScripts,
+        globalActions: [],
+        canRunGlobalAction: true,
         terminalSessions: [],
         onOpenTerminal: () => {},
         onOpenNewTerminal: () => {},
         onRunProjectScript: async () => {},
+        onRunGlobalAction: async () => {},
       }}
       hasThreadCwd
       hasWorkspaceRoot

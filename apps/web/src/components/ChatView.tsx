@@ -315,6 +315,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { takePendingIssueLink } from "../lib/pendingIssueLinks";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -1618,6 +1619,7 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
+  const linkIssue = useAtomCommand(threadEnvironment.linkIssue, { reportFailure: false });
   const deleteThread = useOrchestrationCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -4642,10 +4644,11 @@ export default function ChatView(props: ChatViewProps) {
     },
     [composerRef, scheduleComposerFocus],
   );
-  // An MCP App's approved `ui/message`: queued like a typed message, so it
-  // never steers or interrupts a running turn.
+  // An MCP App's approved `ui/message` or a global action's prompt: queued
+  // like a typed message, so it never steers or interrupts a running turn,
+  // and the composer's draft stays as it is.
   const sendAppMessage = useCallback(
-    async (text: string) => {
+    async (text: string, modelSelection?: ModelSelection) => {
       if (!isServerThread || activeThreadId === null) {
         throw new Error("Messages from apps need a started thread.");
       }
@@ -4654,6 +4657,7 @@ export default function ChatView(props: ChatViewProps) {
         input: {
           threadId: activeThreadId,
           message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+          ...(modelSelection ? { modelSelection } : {}),
           runtimeMode,
           interactionMode,
           dispatchMode: "queue",
@@ -10087,6 +10091,25 @@ export default function ChatView(props: ChatViewProps) {
       } else {
         turnStartSucceeded = true;
         setKeepFullHistory(routeThreadKey, false);
+        if (isLocalDraftThread) {
+          const issue = takePendingIssueLink(scopeThreadRef(environmentId, threadIdForSend));
+          if (issue !== null) {
+            void linkIssue({ environmentId, input: { threadId: threadIdForSend, ...issue } }).then(
+              (result) => {
+                if (result._tag === "Failure") {
+                  const error = squashAtomCommandFailure(result);
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "warning",
+                      title: "Could not link the issue to this thread",
+                      description: error instanceof Error ? error.message : undefined,
+                    }),
+                  );
+                }
+              },
+            );
+          }
+        }
         // The turn is under way and will spend quota, so that thread's limits
         // snapshot is stale. Uploads may have outlasted a navigation, so only
         // the sending thread's panel clears.
@@ -11295,6 +11318,30 @@ export default function ChatView(props: ChatViewProps) {
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
     activeProjectName: activeProject?.title,
+    ...(activeProject
+      ? {
+          globalActionHost: {
+            projectId: activeProject.id,
+            readModelSelection: () =>
+              composerRef.current?.getSendContext().selectedModelSelection ??
+              activeThread.modelSelection,
+            insertPrompt: (text: string) => {
+              if (composerRef.current?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
+                scheduleComposerFocus();
+              }
+            },
+            ...(isServerThread
+              ? {
+                  sendPrompt: (text: string) =>
+                    sendAppMessage(
+                      text,
+                      composerRef.current?.getSendContext().selectedModelSelection,
+                    ),
+                }
+              : {}),
+          },
+        }
+      : {}),
     activeProjectScripts: activeProject ? activeProjectScripts : undefined,
     preferredScriptId: activeProject
       ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)
