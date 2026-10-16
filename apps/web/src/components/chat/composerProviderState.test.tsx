@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   ProviderDriverKind,
+  ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ServerProviderModel,
@@ -8,6 +9,7 @@ import {
 import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
 import {
+  cycleComposerThinkingLevel,
   getComposerPromptInjectionState,
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -67,6 +69,168 @@ const ULTRATHINK_FRAME_CLASSES = {
   composerSurfaceClassName: "shadow-[0_0_0_1px_rgba(255,255,255,0.07)_inset]",
   modelPickerIconClassName: "ultrathink-chroma",
 } as const;
+
+describe("cycleComposerThinkingLevel", () => {
+  const effortOptions = [
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium", isDefault: true },
+    { id: "high", label: "High" },
+  ];
+  const input = {
+    provider: PROVIDER,
+    model: MODEL,
+    models: modelWith([selectDescriptor("reasoningEffort", effortOptions)]),
+    modelOptions: undefined,
+    prompt: "Investigate this failure",
+    planModeEnabled: true,
+    direction: 1,
+  } satisfies Parameters<typeof cycleComposerThinkingLevel>[0];
+
+  it.each(["reasoningEffort", "reasoning", "effort", "variant", "thinking"])(
+    "cycles supported %s levels in both directions from the default",
+    (id) => {
+      const models = modelWith([selectDescriptor(id, effortOptions)]);
+      expect(cycleComposerThinkingLevel({ ...input, models, direction: 1 })).toEqual({
+        prompt: input.prompt,
+        modelOptions: selections([id, "high"]),
+      });
+      expect(cycleComposerThinkingLevel({ ...input, models, direction: -1 })).toEqual({
+        prompt: input.prompt,
+        modelOptions: selections([id, "low"]),
+      });
+    },
+  );
+
+  it.each([
+    ["high", 1, "low"],
+    ["low", -1, "high"],
+  ] as const)("wraps from %s with direction %s", (current, direction, next) => {
+    expect(
+      cycleComposerThinkingLevel({
+        ...input,
+        direction,
+        modelOptions: selections(["reasoningEffort", current], ["fastMode", true]),
+      }),
+    ).toEqual({
+      prompt: input.prompt,
+      modelOptions: selections(["fastMode", true], ["reasoningEffort", next]),
+    });
+  });
+
+  it("finds reasoning after unrelated controls without pinning their defaults", () => {
+    expect(
+      cycleComposerThinkingLevel({
+        ...input,
+        models: modelWith([
+          selectDescriptor("contextWindow", [
+            { id: "200k", label: "200k", isDefault: true },
+            { id: "1m", label: "1M" },
+          ]),
+          selectDescriptor("reasoningEffort", effortOptions),
+        ]),
+      }),
+    ).toEqual({ prompt: input.prompt, modelOptions: selections(["reasoningEffort", "high"]) });
+  });
+
+  it.each([
+    [],
+    [booleanDescriptor("thinking", true)],
+    [selectDescriptor("serviceTier", effortOptions)],
+    [selectDescriptor("effort", [])],
+    [selectDescriptor("effort", [{ id: "high", label: "High" }])],
+  ])("ignores models without multiple thinking levels: %j", (...descriptors) => {
+    expect(cycleComposerThinkingLevel({ ...input, models: modelWith(descriptors) })).toBeNull();
+  });
+
+  it("does not invent levels for an unavailable OpenCode model", () => {
+    expect(
+      cycleComposerThinkingLevel({
+        ...input,
+        provider: ProviderDriverKind.make("opencode"),
+        model: "missing-model",
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    [1, "low"],
+    [-1, "high"],
+  ] as const)("starts at an edge when the current level is unknown (%s)", (direction, next) => {
+    expect(
+      cycleComposerThinkingLevel({
+        ...input,
+        direction,
+        models: modelWith([
+          selectDescriptor(
+            "variant",
+            effortOptions.map(({ id, label }) => ({ id, label })),
+          ),
+        ]),
+      }),
+    ).toEqual({ prompt: input.prompt, modelOptions: selections(["variant", next]) });
+  });
+
+  it("cycles from the displayed provider-reported level unless explicitly overridden", () => {
+    const instanceId = ProviderInstanceId.make("test-instance");
+    const reported = {
+      ...input,
+      instanceId,
+      reportedModelSelection: {
+        instanceId,
+        model: MODEL,
+        options: selections(["reasoningEffort", "high"]),
+      },
+    };
+    expect(cycleComposerThinkingLevel(reported)?.modelOptions).toEqual(
+      selections(["reasoningEffort", "low"]),
+    );
+    expect(
+      cycleComposerThinkingLevel({
+        ...reported,
+        modelOptions: selections(["reasoningEffort", "low"]),
+      })?.modelOptions,
+    ).toEqual(selections(["reasoningEffort", "medium"]));
+  });
+
+  const claude = {
+    ...input,
+    provider: ProviderDriverKind.make("claudeAgent"),
+    models: modelWith([
+      selectDescriptor(
+        "effort",
+        [...effortOptions, { id: "ultrathink", label: "Ultrathink" }],
+        ["ultrathink"],
+      ),
+    ]),
+    modelOptions: selections(["effort", "high"]),
+  };
+
+  it.each([input.prompt, ""])("cycles into prompt-injected Ultrathink: %j", (prompt) => {
+    expect(cycleComposerThinkingLevel({ ...claude, prompt })).toEqual({
+      prompt: `Ultrathink:\n${prompt}`,
+      modelOptions: claude.modelOptions,
+    });
+  });
+
+  it.each([
+    [1, "low"],
+    [-1, "high"],
+  ] as const)("cycles out of Ultrathink in direction %s", (direction, next) => {
+    expect(
+      cycleComposerThinkingLevel({
+        ...claude,
+        prompt: `Ultrathink:\n${input.prompt}`,
+        direction,
+      }),
+    ).toEqual({ prompt: input.prompt, modelOptions: selections(["effort", next]) });
+  });
+
+  it("preserves Ultrathink in the user's body text, matching the effort menu", () => {
+    expect(
+      cycleComposerThinkingLevel({ ...claude, prompt: "Please ultrathink about this" }),
+    ).toBeNull();
+  });
+});
 
 describe("getComposerProviderState", () => {
   it("derives a stable prompt injection state for ordinary prompt edits", () => {

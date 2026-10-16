@@ -27,6 +27,8 @@ describe("KeybindingsSettings.logic", () => {
       "thread.editQueuedMessage",
       "composer.host",
       "composer.effort",
+      "composer.previousThinkingLevel",
+      "composer.nextThinkingLevel",
       "composer.mode",
       "composer.workspace",
       "composer.branch",

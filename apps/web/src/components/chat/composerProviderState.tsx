@@ -8,6 +8,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import {
+  applyClaudePromptEffortPrefix,
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -154,6 +155,74 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
           modelPickerIconClassName: "ultrathink-chroma",
         }
       : {}),
+  };
+}
+
+export function cycleComposerThinkingLevel(
+  input: ComposerProviderStateInput & {
+    prompt: string;
+    direction: -1 | 1;
+    instanceId?: ProviderInstanceId;
+    reportedModelSelection?: ModelSelection | null | undefined;
+  },
+) {
+  if (
+    input.provider === "opencode" &&
+    !input.models.some((model) => model.slug === normalizeModelSlug(input.model, input.provider))
+  ) {
+    return null;
+  }
+  const { caps, selections } = resolveComposerOptionSelections(
+    input.models,
+    input.model,
+    input.provider,
+    input.modelOptions,
+    input.planModeEnabled,
+  );
+  const descriptor = getProviderOptionDescriptors({ caps, selections }).find(
+    (option) =>
+      option.type === "select" &&
+      ["reasoningEffort", "reasoning", "effort", "variant", "thinking"].includes(option.id),
+  );
+  if (descriptor?.type !== "select" || descriptor.options.length < 2) return null;
+
+  const promptControlled =
+    (descriptor.promptInjectedValues?.length ?? 0) > 0 && isClaudeUltrathinkPrompt(input.prompt);
+  const strippedPrompt = input.prompt.replace(/^Ultrathink:\s*/i, "");
+  if (promptControlled && isClaudeUltrathinkPrompt(strippedPrompt)) return null;
+  const currentValue = promptControlled
+    ? "ultrathink"
+    : getProviderOptionCurrentValue(
+        descriptor,
+        input.instanceId
+          ? { instanceId: input.instanceId, model: input.model, options: selections ?? [] }
+          : undefined,
+        input.reportedModelSelection,
+      );
+  const index = descriptor.options.findIndex((option) => option.id === currentValue);
+  const nextIndex =
+    index === -1
+      ? input.direction === 1
+        ? 0
+        : descriptor.options.length - 1
+      : (index + input.direction + descriptor.options.length) % descriptor.options.length;
+  const next = descriptor.options[nextIndex];
+  if (!next) return null;
+  if (descriptor.promptInjectedValues?.includes(next.id)) {
+    return {
+      prompt:
+        input.prompt.trim().length === 0
+          ? "Ultrathink:\n"
+          : applyClaudePromptEffortPrefix(input.prompt, "ultrathink"),
+      modelOptions: selections,
+    };
+  }
+  return {
+    prompt: promptControlled ? strippedPrompt : input.prompt,
+    modelOptions: [
+      ...(selections ?? []).filter((option) => option.id !== descriptor.id),
+      { id: descriptor.id, value: next.id },
+    ],
   };
 }
 

@@ -1441,6 +1441,29 @@ describe("composer and pull request shortcuts", () => {
     },
   );
 
+  it.each([
+    [",", "Comma", "≤", "composer.previousThinkingLevel"],
+    [".", "Period", "≥", "composer.nextThinkingLevel"],
+  ])("cycles thinking levels with Alt+%s across platforms", (key, code, macKey, command) => {
+    for (const platform of ["MacIntel", "Win32", "Linux"]) {
+      const input = event({ key: platform === "MacIntel" ? macKey : key, code, altKey: true });
+      assert.strictEqual(
+        resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, { platform }),
+        command,
+      );
+      for (const context of [{ terminalFocus: true }, { previewFocus: true }]) {
+        assert.isNull(
+          resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+        );
+      }
+      assert.isNull(
+        resolveShortcutCommand({ ...input, altKey: false }, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+        }),
+      );
+    }
+  });
+
   const shortcuts = [
     ["h", "composer.host"],
     ["e", "composer.effort"],

@@ -7847,6 +7847,20 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (
+        command === "composer.previousThinkingLevel" ||
+        command === "composer.nextThinkingLevel"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) {
+          composerRef.current?.cycleThinkingLevel(
+            command === "composer.nextThinkingLevel" ? 1 : -1,
+          );
+        }
+        return;
+      }
+
       if (command === "composer.cycleHost") {
         if (envLocked || !draftId || !hasMultipleEnvironments) return;
         event.preventDefault();
