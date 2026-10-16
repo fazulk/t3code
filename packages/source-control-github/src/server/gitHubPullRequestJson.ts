@@ -63,6 +63,7 @@ import type {
   ViewerPermissions,
 } from "./pullRequestReads.graphql.ts";
 import type {
+  ReactionGroup,
   ReviewDismissals,
   ReviewThreadComments,
   ReviewThreads,
@@ -237,7 +238,7 @@ type RawReactionGroups = typeof RawReactionGroupsSchema.Type;
  * in would name them twice — but `count` still counts them along with everyone else.
  */
 export function toReactions(
-  groups: RawReactionGroups,
+  groups: RawReactionGroups | ReadonlyArray<ReactionGroup>,
   viewer: string | null,
 ): ReadonlyArray<PullRequestReaction> {
   const normalizedViewer = viewer?.toLowerCase() ?? null;
@@ -245,8 +246,8 @@ export function toReactions(
   for (const group of groups ?? []) {
     const content = REACTION_CONTENT_BY_GITHUB[trimmed(group.content)?.toUpperCase() ?? ""];
     if (content === undefined) continue;
-    const logins = nodesOf(group.reactors).flatMap((node) =>
-      "login" in node ? (trimmed(node.login) ?? []) : [],
+    const logins = (group.reactors?.nodes ?? []).flatMap((node) =>
+      node !== null && "login" in node ? (trimmed(node.login) ?? []) : [],
     );
     const count = Math.max(group.reactors?.totalCount ?? 0, logins.length);
     if (count <= 0) continue;
