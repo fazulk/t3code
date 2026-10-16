@@ -918,6 +918,8 @@ export function IssueDetailPanel({
             {detail.writable ? null : <span>Read-only</span>}
           </PullRequestMetaLine>
 
+          <IssueLinkedThreads environmentId={environmentId} detail={detail} />
+
           <div className="flex flex-wrap items-center gap-1.5">
             {detail.labels.map((label) => (
               <PullRequestLabelChip key={issueLabelId(label)} label={label} />
@@ -1024,8 +1026,6 @@ export function IssueDetailPanel({
               />
             ) : null}
           </section>
-
-          <IssueLinkedThreads environmentId={environmentId} detail={detail} />
 
           {detail.linkedPullRequests.length > 0 ? (
             <section className="flex flex-col gap-1">

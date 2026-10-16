@@ -212,8 +212,10 @@ export function IssueLinkedThreads({
     projects.find((project) => project.environmentId === environmentId && project.id === projectId)
       ?.title;
   return (
-    <section className="flex flex-col gap-1">
-      <h3 className="text-xs text-muted-foreground">Threads</h3>
+    <section className="flex flex-col gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-1.5">
+      <h3 className="px-1.5 pt-0.5 pb-1 text-xs font-medium text-foreground/80">
+        {linked.length === 1 ? "1 linked thread" : `${linked.length} linked threads`}
+      </h3>
       {linked.map((thread) => (
         <button
           key={thread.id}
@@ -226,8 +228,8 @@ export function IssueLinkedThreads({
             })
           }
         >
-          <MessageSquareIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-sm">
+          <MessageSquareIcon aria-hidden className="size-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
             {thread.title || "Untitled thread"}
           </span>
           <span className="shrink-0 truncate text-xs text-muted-foreground">
