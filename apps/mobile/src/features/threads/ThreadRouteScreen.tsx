@@ -1,6 +1,11 @@
 import * as Dialog from "../../components/ui/Dialog";
+import { useAtomValue } from "@effect/atom-react";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
-import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
+import { makeQueuedMessageMetadata, makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
@@ -17,9 +22,12 @@ import {
   AuthOrchestrationOperateScope,
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
+  CommandId,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  MessageId,
   ThreadId,
+  type GlobalAction,
   type ProjectScript,
 } from "@t3tools/contracts";
 import {
@@ -32,11 +40,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionsReady } from "../../state/workspace";
 import { useEnvironmentShellReadiness } from "../../state/shell";
 import { restoredNewTaskDraftKey } from "../../state/new-task-draft-key";
+import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
+import {
+  createNewTaskDraft,
+  mergeComposerDraftContent,
+  setComposerDraftText,
+  updateComposerDraftSettings,
+  waitForComposerDraftsLoaded,
+} from "../../state/use-composer-drafts";
 import { clearPendingThreadCreationOutcome } from "../../state/pending-thread-creation";
 import { recoverFailedThreadDraft } from "../../state/recover-failed-thread-draft";
 import { useEnvironmentQuery } from "../../state/query";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
+import { serverEnvironment } from "../../state/server";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -350,6 +367,127 @@ function ThreadRouteContent(
       mergeBackBusyRef.current = false;
     }
   }, [mergeBack, mergeBackRun, mergeBackTargetThreadId, navigation, selectedThread]);
+  const runGlobalAction = useAtomCommand(serverEnvironment.runGlobalAction, {
+    label: "run global action",
+    reportFailure: false,
+  });
+  const canRunGlobalAction = useAtomValue(
+    serverEnvironment.runGlobalAction.permissionAtom(selectedThread?.environmentId ?? null),
+  );
+  const globalActionBusyRef = useRef(false);
+  const handleRunGlobalAction = useCallback(
+    async (action: GlobalAction) => {
+      if (globalActionBusyRef.current || !selectedThread) return;
+      globalActionBusyRef.current = true;
+      const autoSubmit = action.autoSubmit !== false;
+      // The settings this thread's composer would send with.
+      const composerDraftKey = composer.composerDraftKey;
+      const modelSelection = composer.modelSelection;
+      const runtimeMode = composer.runtimeMode;
+      const interactionMode = composer.interactionMode;
+      try {
+        if (action.target === "current-thread") {
+          if (!autoSubmit) {
+            // Appended, so anything the user already typed stays.
+            if (composerDraftKey) {
+              await mergeComposerDraftContent(composerDraftKey, {
+                text: action.prompt,
+                attachments: [],
+              });
+            }
+            return;
+          }
+          // Queuing against a thread the server has not created yet would
+          // strand the message, as in the composer's send.
+          if (selectedThreadCreation !== null) {
+            Alert.alert(`Could not run ${action.name}`, "This thread has not started yet.");
+            return;
+          }
+          // Its own queued message, leaving the composer draft untouched.
+          const metadata = makeQueuedMessageMetadata();
+          await enqueueThreadOutboxMessage({
+            environmentId: selectedThread.environmentId,
+            threadId: selectedThread.id,
+            messageId: MessageId.make(metadata.messageId),
+            commandId: CommandId.make(metadata.commandId),
+            text: action.prompt,
+            attachments: [],
+            ...(modelSelection ? { modelSelection } : {}),
+            ...(runtimeMode ? { runtimeMode } : {}),
+            ...(interactionMode ? { interactionMode } : {}),
+            dispatchMode: "queue",
+            createdAt: metadata.createdAt,
+          });
+          return;
+        }
+        if (!autoSubmit) {
+          // Opens the prompt in a new task for the user to review and send.
+          await waitForComposerDraftsLoaded();
+          const draftKey = createNewTaskDraft({
+            environmentId: selectedThread.environmentId,
+            projectId: selectedThread.projectId,
+          });
+          setComposerDraftText(draftKey, action.prompt);
+          const draftModelSelection = action.modelSelection ?? modelSelection;
+          updateComposerDraftSettings(draftKey, {
+            ...(draftModelSelection ? { modelSelection: draftModelSelection } : {}),
+            ...(action.workspace
+              ? {
+                  workspaceSelection: { mode: action.workspace, branch: null, worktreePath: null },
+                }
+              : {}),
+          });
+          navigation.navigate("NewTaskSheet", {
+            screen: "NewTaskDraft",
+            params: {
+              draftId: draftKey,
+              ...(selectedThreadProject ? { title: selectedThreadProject.title } : {}),
+            },
+          });
+          return;
+        }
+        const result = await runGlobalAction({
+          environmentId: selectedThread.environmentId,
+          input: {
+            actionId: action.id,
+            projectId: selectedThread.projectId,
+            creationSource: "mobile",
+            ...(modelSelection ? { modelSelection } : {}),
+          },
+        });
+        if (result._tag === "Success") {
+          navigation.navigate("Thread", {
+            environmentId: selectedThread.environmentId,
+            threadId: result.value.threadId,
+          });
+        } else if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          Alert.alert(
+            `Could not run ${action.name}`,
+            failure instanceof Error ? failure.message : String(failure),
+          );
+        }
+      } catch (error) {
+        Alert.alert(
+          `Could not run ${action.name}`,
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        globalActionBusyRef.current = false;
+      }
+    },
+    [
+      composer.composerDraftKey,
+      composer.interactionMode,
+      composer.modelSelection,
+      composer.runtimeMode,
+      navigation,
+      runGlobalAction,
+      selectedThread,
+      selectedThreadCreation,
+      selectedThreadProject,
+    ],
+  );
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
@@ -796,11 +934,14 @@ function ThreadRouteContent(
           selectedThreadProject,
         )
       : [],
+    globalActions: routeEnvironmentRuntime?.serverConfig?.settings.globalActions ?? [],
+    canRunGlobalAction,
     terminalSessions: terminalMenuSessions,
     showDirectFileControl: layout.usesSplitView,
     onOpenTerminal: handleOpenTerminal,
     onOpenNewTerminal: handleOpenNewTerminal,
     onRunProjectScript: handleRunProjectScript,
+    onRunGlobalAction: handleRunGlobalAction,
     onPull: gitActions.onPullSelectedThreadBranch,
     onRunAction: gitActions.onRunSelectedThreadGitAction,
   };

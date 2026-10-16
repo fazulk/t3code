@@ -321,6 +321,12 @@ links in the conversation open there) and use **Link to this thread** in its hea
 undoes it. Linked issues are listed in the thread's details beside its pull requests, with their
 last known state. Agents link the issues they work on with the `link_issue` tool.
 
+To start work on an issue, use **Start thread** in its header and choose a new worktree or the
+project's repository. The thread starts in the issue's project unless you pick another one in the
+same menu, which suits trackers such as Jira that span several repositories. The thread opens with the issue beside it and a prompt naming it in the
+composer, and is linked to the issue when you send. The issue lists the threads that link to it
+under **Threads**.
+
 Writing to a tracker over a remote connection requires the `source-control:write` scope.
 
 ## GitHub stacks

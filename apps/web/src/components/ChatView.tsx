@@ -320,6 +320,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { takePendingIssueLink } from "../lib/pendingIssueLinks";
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,
@@ -1691,6 +1692,7 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
+  const linkIssue = useAtomCommand(threadEnvironment.linkIssue, { reportFailure: false });
   const deleteThread = useOrchestrationCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -4530,7 +4532,7 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocus();
   };
   const useArtifactTemplateStable = useStableCallback(useArtifactTemplate);
-  const sendAppMessage = async (text: string) => {
+  const sendAppMessage = async (text: string, modelSelection?: ModelSelection) => {
     if (!isServerThread || activeThreadId === null) {
       throw new Error("Messages from apps need a started thread.");
     }
@@ -4539,6 +4541,7 @@ export default function ChatView(props: ChatViewProps) {
       input: {
         threadId: activeThreadId,
         message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+        ...(modelSelection ? { modelSelection } : {}),
         runtimeMode,
         interactionMode,
         dispatchMode: "queue",
@@ -9591,6 +9594,25 @@ export default function ChatView(props: ChatViewProps) {
       } else {
         turnStartSucceeded = true;
         setKeepFullHistory(routeThreadKey, false);
+        if (isLocalDraftThread) {
+          const issue = takePendingIssueLink(scopeThreadRef(environmentId, threadIdForSend));
+          if (issue !== null) {
+            void linkIssue({ environmentId, input: { threadId: threadIdForSend, ...issue } }).then(
+              (result) => {
+                if (result._tag === "Failure") {
+                  const error = squashAtomCommandFailure(result);
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "warning",
+                      title: "Could not link the issue to this thread",
+                      description: error instanceof Error ? error.message : undefined,
+                    }),
+                  );
+                }
+              },
+            );
+          }
+        }
         clearUsageLimitsFor(routeThreadKey);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
@@ -10700,6 +10722,30 @@ export default function ChatView(props: ChatViewProps) {
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
     activeProjectName: activeProject?.title,
+    ...(activeProject
+      ? {
+          globalActionHost: {
+            projectId: activeProject.id,
+            readModelSelection: () =>
+              composerRef.current?.getSendContext().selectedModelSelection ??
+              activeThread.modelSelection,
+            insertPrompt: (text: string) => {
+              if (composerRef.current?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
+                scheduleComposerFocus();
+              }
+            },
+            ...(isServerThread
+              ? {
+                  sendPrompt: (text: string) =>
+                    sendAppMessage(
+                      text,
+                      composerRef.current?.getSendContext().selectedModelSelection,
+                    ),
+                }
+              : {}),
+          },
+        }
+      : {}),
     activeProjectScripts: activeProject ? activeProjectScripts : undefined,
     preferredScriptId: activeProject
       ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)

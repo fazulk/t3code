@@ -359,6 +359,7 @@ import {
   ServerSettingsError,
   ServerSettingsPatch,
 } from "./settings.ts";
+import { GlobalActionError, GlobalActionRunInput, GlobalActionRunResult } from "./globalAction.ts";
 import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
@@ -539,6 +540,8 @@ export const WS_METHODS = {
   secretsAnswerRequest: "secrets.answerRequest",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  globalActionsRun: "globalActions.run",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -1935,6 +1938,12 @@ const WsScheduledTasksRunNowRpc = Rpc.make(WS_METHODS.scheduledTasksRunNow, {
   error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
 });
 
+const WsGlobalActionsRunRpc = Rpc.make(WS_METHODS.globalActionsRun, {
+  payload: GlobalActionRunInput,
+  success: GlobalActionRunResult,
+  error: Schema.Union([GlobalActionError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksRotateWebhookTokenRpc = Rpc.make(
   WS_METHODS.scheduledTasksRotateWebhookToken,
   {
@@ -2076,6 +2085,7 @@ export const WsCoreRpcGroup = RpcGroup.make(
   WsScheduledTasksDeleteRpc,
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
+  WsGlobalActionsRunRpc,
   WsSecretsAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
