@@ -6,7 +6,7 @@ usage() {
   cat <<'USAGE'
 Usage: ./update-app.sh [codex|claude] [--dry-run]
 
-Launch an interactive agent to sync upstream/main, rebase the current branch,
+Launch an interactive agent to sync upstream/main, rebase and push the current branch,
 build the macOS desktop app, and replace /Applications/T3 Code (Nightly).app.
 Quit and relaunch T3 Code after installation.
 Defaults to Codex. --dry-run prints the instructions without launching an agent.
@@ -43,7 +43,11 @@ The invoking terminal's directory is the checkout; keep working in it.
    a feature branch, and no unfinished rebase, merge, or cherry-pick. Stop and
    explain any blocker. Do not commit, stash, reset, or discard existing work.
    Record the starting branch and commit; create a uniquely named local backup
-   branch before changing history. Do not push or create a pull request.
+   branch before changing history. Do not create a pull request.
+   Confirm origin points to https://github.com/fazulk/t3code.git (the SSH
+   equivalent is fine), then fetch the starting branch from origin. Record its
+   exact remote commit before rebasing, and require it to be an ancestor of the
+   starting local commit; otherwise stop rather than overwrite remote work.
 
 2. The true upstream is https://github.com/pingdotgg/t3code.git. Confirm the
    upstream remote points there (the SSH equivalent is fine); stop if it does
@@ -74,7 +78,16 @@ The invoking terminal's directory is the checkout; keep working in it.
    Do not run repository-wide tests, lint, or typechecks. If a build fails,
    stop and report it; do not install an older artifact or make unrelated fixes.
 
-4. Install destination: /Applications/T3 Code (Nightly).app. Preserve the Nightly
+4. After the build succeeds, publish the rebased starting branch to origin.
+   First preserve the recorded remote commit under a uniquely named remote
+   backup branch. Then push HEAD explicitly to refs/heads/<starting-branch>
+   using --force-with-lease=refs/heads/<starting-branch>:<recorded-remote-commit>.
+   Never use plain --force or refresh the expected commit to bypass rejection.
+   If the lease fails, stop and explain that the remote changed. Verify the
+   remote branch matches HEAD. Do not push main or upstream. Report the remote
+   backup branch and published commit.
+
+5. Install destination: /Applications/T3 Code (Nightly).app. Preserve the Nightly
    product name and com.t3tools.t3code bundle identifier. For the current builder,
    use the server package's base version plus `-nightly.YYYYMMDD.<unix-seconds>`
    as the build version. Verify the generated bundle's identity before copying.
@@ -87,7 +100,7 @@ The invoking terminal's directory is the checkout; keep working in it.
    its path. Do not merge files into the existing bundle. If /Applications is
    not writable, stop and give me the exact installation command to run.
 
-5. After installation, automatically quit and relaunch the app. This session
+6. After installation, automatically quit and relaunch the app. This session
    may itself run inside T3 Code, so do not quit it directly from the agent.
    First report the upstream commit, rebased branch and commit, build version,
    installed app path, backup paths, and a restart log path. Then schedule a
