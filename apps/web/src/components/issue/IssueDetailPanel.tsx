@@ -745,64 +745,65 @@ export function IssueDetailPanel({
     onUpdated?.();
   };
 
-  const stateControl: ReactNode = canSetState ? (
-    <span className="flex shrink-0 items-center gap-1">
-      {openingStates.length === 1 && closingStates.length === 0 ? (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={changingState}
-          onClick={() => void moveTo(openingStates[0]!.name)}
-        >
-          Reopen
-        </Button>
-      ) : null}
-      {closingStates.length === 1 &&
-      detail.capabilities.closeReasons.length === 0 &&
-      openingStates.length === 0 ? (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={changingState}
-          onClick={() => void moveTo(closingStates[0]!.name)}
-        >
-          Close
-        </Button>
-      ) : null}
-      {(closingStates.length > 0 && detail.capabilities.closeReasons.length > 0) ||
-      otherStates.length > 1 ? (
-        <Menu>
-          <MenuTrigger render={<Button size="xs" variant="outline" disabled={changingState} />}>
-            {detail.state.category === "open" ? "Close" : "Change state"}
-            <ChevronDownIcon aria-hidden className="size-3" />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            {otherStates.flatMap((state) =>
-              state.category === "closed" && detail.capabilities.closeReasons.length > 0
-                ? closeReasonsFor(state).map((reason) => (
-                    <MenuItem
-                      key={`${state.name}:${reason}`}
-                      onClick={() => void moveTo(state.name, reason)}
-                    >
-                      {state.name === "closed" ? "Close" : state.name} as{" "}
-                      {issueCloseReasonLabel(reason).toLowerCase()}
-                    </MenuItem>
-                  ))
-                : [
-                    <MenuItem key={state.name} onClick={() => void moveTo(state.name)}>
-                      {state.category === "open" && state.name === "open"
-                        ? "Reopen"
-                        : state.name === "closed"
-                          ? "Close"
-                          : `Move to ${state.name}`}
-                    </MenuItem>,
-                  ],
-            )}
-          </MenuPopup>
-        </Menu>
-      ) : null}
-    </span>
-  ) : null;
+  const stateControl: ReactNode =
+    canSetState && detail.tracker !== "jira" ? (
+      <span className="flex shrink-0 items-center gap-1">
+        {openingStates.length === 1 && closingStates.length === 0 ? (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={changingState}
+            onClick={() => void moveTo(openingStates[0]!.name)}
+          >
+            Reopen
+          </Button>
+        ) : null}
+        {closingStates.length === 1 &&
+        detail.capabilities.closeReasons.length === 0 &&
+        openingStates.length === 0 ? (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={changingState}
+            onClick={() => void moveTo(closingStates[0]!.name)}
+          >
+            Close
+          </Button>
+        ) : null}
+        {(closingStates.length > 0 && detail.capabilities.closeReasons.length > 0) ||
+        otherStates.length > 1 ? (
+          <Menu>
+            <MenuTrigger render={<Button size="xs" variant="outline" disabled={changingState} />}>
+              {detail.state.category === "open" ? "Close" : "Change state"}
+              <ChevronDownIcon aria-hidden className="size-3" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              {otherStates.flatMap((state) =>
+                state.category === "closed" && detail.capabilities.closeReasons.length > 0
+                  ? closeReasonsFor(state).map((reason) => (
+                      <MenuItem
+                        key={`${state.name}:${reason}`}
+                        onClick={() => void moveTo(state.name, reason)}
+                      >
+                        {state.name === "closed" ? "Close" : state.name} as{" "}
+                        {issueCloseReasonLabel(reason).toLowerCase()}
+                      </MenuItem>
+                    ))
+                  : [
+                      <MenuItem key={state.name} onClick={() => void moveTo(state.name)}>
+                        {state.category === "open" && state.name === "open"
+                          ? "Reopen"
+                          : state.name === "closed"
+                            ? "Close"
+                            : `Move to ${state.name}`}
+                      </MenuItem>,
+                    ],
+              )}
+            </MenuPopup>
+          </Menu>
+        ) : null}
+      </span>
+    ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -835,8 +836,20 @@ export function IssueDetailPanel({
             <Button
               size="icon-xs"
               variant="ghost"
-              aria-label={`Open on ${tracker.providerName}`}
-              render={<a href={detail.url} target="_blank" rel="noopener noreferrer" />}
+              aria-label={
+                detail.tracker === "jira" ? "Open in BetterJira" : `Open on ${tracker.providerName}`
+              }
+              render={
+                <a
+                  href={
+                    detail.tracker === "jira"
+                      ? `betterjira://issue/${encodeURIComponent(detail.key)}`
+                      : detail.url
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
             >
               <ExternalLinkIcon aria-hidden className="size-3.5" />
             </Button>
