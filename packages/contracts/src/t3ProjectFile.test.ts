@@ -60,6 +60,9 @@ describe("T3ProjectFile", () => {
   it("decodes defaultThreadEnvMode and rejects unknown modes", () => {
     expect(decode({ defaultThreadEnvMode: "worktree" }).defaultThreadEnvMode).toBe("worktree");
     expect(decode({ defaultThreadEnvMode: "local" }).defaultThreadEnvMode).toBe("local");
+    expect(decode({ defaultThreadEnvMode: "active-thread" }).defaultThreadEnvMode).toBe(
+      "active-thread",
+    );
     expect(() => decode({ defaultThreadEnvMode: "remote" })).toThrow();
   });
 

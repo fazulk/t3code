@@ -22,7 +22,11 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveActiveThreadWorkspace,
+  resolveNewThreadEnvMode,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import {
   readProject,
   readProjects,
@@ -140,19 +144,26 @@ export function useNewThreadHandler() {
             currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
           destinationDraftId,
         });
-      const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
+      const resolveDefaultWorkspace = async () => {
         const consultProjectFile =
           project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
         const projectFile = consultProjectFile
           ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
           : null;
-        return resolveNewThreadEnvMode({
-          projectSettings: resolveProjectSettings(
-            targetServerSettings,
-            project?.id ?? null,
-            project,
-            projectFile,
-          ),
+        const resolvedSettings = resolveProjectSettings(
+          targetServerSettings,
+          project?.id ?? null,
+          project,
+          projectFile,
+        );
+        const inherited = resolveActiveThreadWorkspace({
+          workspace: resolvedSettings.settings.defaultThreadEnvMode,
+          projectRef,
+          activeThread: carrySourceShell ?? carrySourceDraft,
+        });
+        if (inherited) return inherited;
+        const envMode = resolveNewThreadEnvMode({
+          projectSettings: resolvedSettings,
           workspaceRoot: project?.workspaceRoot ?? null,
           newProjectsRoot: environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
           projectHasThreads: readThreadShells().some(
@@ -161,6 +172,15 @@ export function useNewThreadHandler() {
               thread.projectId === projectRef.projectId,
           ),
         });
+        return {
+          branch: null,
+          worktreePath: null,
+          envMode,
+          startFromOrigin: resolveNewDraftStartFromOrigin({
+            envMode,
+            newWorktreesStartFromOrigin: resolvedSettings.settings.newWorktreesStartFromOrigin,
+          }),
+        };
       };
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
@@ -207,7 +227,7 @@ export function useNewThreadHandler() {
           if (hasExplicitWorkspaceOption) {
             workspaceContext = pickExplicitWorkspaceOptions(options);
           } else if (!isDraftAlreadyOpen) {
-            const defaultEnvMode = await resolveDefaultEnvMode();
+            const defaultWorkspace = await resolveDefaultWorkspace();
             if (abandonedSinceRequest()) {
               return null;
             }
@@ -233,15 +253,7 @@ export function useNewThreadHandler() {
             if (openedMeanwhile || promotedMeanwhile || remappedMeanwhile || investedMeanwhile) {
               return null;
             }
-            workspaceContext = {
-              branch: null,
-              worktreePath: null,
-              envMode: defaultEnvMode,
-              startFromOrigin: resolveNewDraftStartFromOrigin({
-                envMode: defaultEnvMode,
-                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-              }),
-            };
+            workspaceContext = defaultWorkspace;
           }
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {
@@ -330,7 +342,25 @@ export function useNewThreadHandler() {
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
-        const initialEnvMode = options?.envMode ?? (await resolveDefaultEnvMode());
+        const hasExplicitWorkspace =
+          hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasStartFromOriginOption;
+        const defaultWorkspace =
+          hasExplicitWorkspace && options?.envMode !== undefined
+            ? { branch: null, worktreePath: null, envMode: options.envMode }
+            : await resolveDefaultWorkspace();
+        const workspace = hasExplicitWorkspace
+          ? {
+              branch: options?.branch ?? null,
+              worktreePath: options?.worktreePath ?? null,
+              envMode: options?.envMode ?? defaultWorkspace.envMode,
+              startFromOrigin:
+                options?.startFromOrigin ??
+                resolveNewDraftStartFromOrigin({
+                  envMode: options?.envMode ?? defaultWorkspace.envMode,
+                  newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
+                }),
+            }
+          : defaultWorkspace;
         if (abandonedSinceRequest()) {
           return null;
         }
@@ -361,15 +391,7 @@ export function useNewThreadHandler() {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
           createdAt,
-          branch: options?.branch ?? null,
-          worktreePath: options?.worktreePath ?? null,
-          envMode: initialEnvMode,
-          startFromOrigin:
-            options?.startFromOrigin ??
-            resolveNewDraftStartFromOrigin({
-              envMode: initialEnvMode,
-              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-            }),
+          ...workspace,
           runtimeMode: defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });

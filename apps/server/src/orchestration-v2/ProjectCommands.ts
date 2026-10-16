@@ -7,7 +7,7 @@ import {
   ProjectId,
   type ProjectScript,
   SCRIPT_RUN_COMMAND_PATTERN,
-  type ThreadEnvMode,
+  type NewThreadWorkspace,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
@@ -32,7 +32,7 @@ export interface ProjectMetaUpdateCommand {
   readonly title?: string;
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
-  readonly defaultThreadEnvMode?: ThreadEnvMode | null;
+  readonly defaultThreadEnvMode?: NewThreadWorkspace | null;
   readonly autoPull?: boolean;
   readonly faviconPath?: string | null;
   readonly projectIcon?: ProjectIconOverride | null;

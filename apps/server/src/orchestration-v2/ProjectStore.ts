@@ -6,7 +6,7 @@ import {
   StoredProjectIcon,
   ProjectId,
   ProjectScript,
-  ThreadEnvMode,
+  NewThreadWorkspace,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -33,7 +33,7 @@ export const ProjectRow = Schema.Struct({
   title: Schema.String,
   workspaceRoot: Schema.String,
   defaultModelSelection: Schema.NullOr(ModelSelection),
-  defaultThreadEnvMode: Schema.NullOr(ThreadEnvMode),
+  defaultThreadEnvMode: Schema.NullOr(NewThreadWorkspace),
   autoPull: Schema.Boolean,
   faviconPath: Schema.NullOr(Schema.String),
   projectIcon: Schema.NullOr(StoredProjectIcon),

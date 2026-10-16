@@ -8,7 +8,7 @@ import {
   type ResponseStreamingMode,
   type ServerSettings,
   type ServerSettingsPatch,
-  type ThreadEnvMode,
+  type NewThreadWorkspace,
   type WorktreeSubmodules,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
@@ -83,19 +83,24 @@ const SUBMODULE_CHOICES: ReadonlyArray<{
 ];
 
 const WORKSPACE_CHOICES: ReadonlyArray<{
-  readonly mode: ThreadEnvMode | null;
+  readonly mode: NewThreadWorkspace | null;
   readonly label: string;
   readonly description: string;
 }> = [
   {
     mode: null,
     label: "Inherit",
-    description: "Use the repository's t3.json, or the current checkout.",
+    description: "Use the repository's t3.json, or the project checkout.",
   },
   {
     mode: "local",
-    label: "Current checkout",
+    label: "Project checkout",
     description: "Start new threads in the existing workspace.",
+  },
+  {
+    mode: "active-thread",
+    label: "Same as active thread",
+    description: "Reuse the active thread’s checkout, or the project checkout when none is active.",
   },
   {
     mode: "worktree",

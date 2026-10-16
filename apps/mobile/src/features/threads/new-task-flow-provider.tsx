@@ -1,3 +1,4 @@
+import { useNavigationState } from "@react-navigation/native";
 import * as Dialog from "../../components/ui/Dialog";
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
 import { useEnvironmentPresentation } from "../../state/presentation";
@@ -24,7 +25,11 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveActiveThreadWorkspace,
+  resolveNewThreadEnvMode,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
@@ -254,6 +259,18 @@ const NewTaskFlowContext = React.createContext<NewTaskFlowContextValue | null>(n
 export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const projects = useProjects();
   const threads = useThreadShells();
+  const sourceRoute = useNavigationState((state) =>
+    state.routes[state.index - 1]?.name === "Thread" ? state.routes[state.index - 1] : undefined,
+  );
+  const sourceParams = sourceRoute?.params;
+  const sourceThread =
+    sourceParams && "environmentId" in sourceParams && "threadId" in sourceParams
+      ? (threads.find(
+          (thread) =>
+            thread.environmentId === sourceParams.environmentId &&
+            thread.id === sourceParams.threadId,
+        ) ?? null)
+      : null;
   const { savedConnectionsById } = useSavedRemoteConnections();
   const groupingSettings = useMobileProjectGroupingSettings();
   const { enabled: legacyPlanModeEnabled, loaded: planModePreferenceLoaded } =
@@ -503,6 +520,25 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         thread.environmentId === selectedProject.environmentId &&
         thread.projectId === selectedProject.id,
     );
+  const inheritedWorkspace =
+    selectedProject && canChooseWorkspace
+      ? resolveActiveThreadWorkspace({
+          workspace: projectSettings.settings.defaultThreadEnvMode,
+          projectRef: {
+            environmentId: selectedProject.environmentId,
+            projectId: selectedProject.id,
+          },
+          activeThread: sourceThread,
+        })
+      : null;
+  const inheritedSelection = inheritedWorkspace
+    ? {
+        mode: "local" as const,
+        branch: inheritedWorkspace.branch,
+        worktreePath: inheritedWorkspace.worktreePath,
+        startFromOrigin: false,
+      }
+    : undefined;
   const defaultWorkspaceMode: WorkspaceMode = canChooseWorkspace
     ? resolveNewThreadEnvMode({
         projectSettings,
@@ -522,14 +558,16 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const workspaceMode = canChooseWorkspace
     ? (selectedProjectDraft.workspaceSelection?.mode ?? defaultWorkspaceMode)
     : "local";
-  const selectedBranchName = selectedProjectDraft.workspaceSelection?.branch ?? null;
-  const selectedWorktreePath = selectedProjectDraft.workspaceSelection?.worktreePath ?? null;
+  const effectiveWorkspaceSelection = selectedProjectDraft.workspaceSelection ?? inheritedSelection;
+  const selectedBranchName = effectiveWorkspaceSelection?.branch ?? null;
+  const selectedWorktreePath = effectiveWorkspaceSelection?.worktreePath ?? null;
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
   const draftStartFromOrigin = selectedProjectDraft.workspaceSelection?.startFromOrigin;
   const startFromOrigin =
-    draftStartFromOrigin ?? projectSettings.settings.newWorktreesStartFromOrigin;
+    effectiveWorkspaceSelection?.startFromOrigin ??
+    projectSettings.settings.newWorktreesStartFromOrigin;
   const defaultRuntimeMode = editingPendingTask
     ? (editingPendingTask.runtimeMode ?? DEFAULT_RUNTIME_MODE)
     : projectSettings.settings.defaultRuntimeMode;
@@ -1068,7 +1106,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       if ((text.length === 0 && draft.attachments.length === 0) || !draftModelSelection) {
         return null;
       }
-      const workspaceSelection = canChooseWorkspace ? draft.workspaceSelection : undefined;
+      const workspaceSelection = canChooseWorkspace
+        ? (draft.workspaceSelection ?? inheritedSelection)
+        : undefined;
       const mode = workspaceSelection?.mode ?? workspaceMode;
       // When the selection is the stand-in built from the queued snapshot,
       // persist the original (possibly absent) snapshot values — the
@@ -1105,8 +1145,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           ...(projectTitle !== undefined ? { projectTitle } : {}),
           ...(projectCwd !== undefined ? { projectCwd } : {}),
           workspaceMode: mode,
-          ...(mode === "worktree" && workspaceSelection?.pullRequestReference
-            ? { pullRequestReference: workspaceSelection.pullRequestReference }
+          ...(mode === "worktree" && draft.workspaceSelection?.pullRequestReference
+            ? { pullRequestReference: draft.workspaceSelection.pullRequestReference }
             : {}),
           // An explicit picker choice wins. Otherwise only a task sending now
           // records the current checkout: a queued local task drains days
@@ -1127,6 +1167,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     },
     [
       canChooseWorkspace,
+      inheritedSelection,
       defaultRuntimeMode,
       editingPendingProject,
       editingPendingTask,

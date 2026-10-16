@@ -873,6 +873,18 @@ describe("provider enabled defaults", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
+  it("round-trips active-thread defaults at environment and project scope", () => {
+    const settings = decodeServerSettings({
+      defaultThreadEnvMode: "active-thread",
+      projectSettingsOverrides: { project: { defaultThreadEnvMode: "active-thread" } },
+    });
+    expect(settings.defaultThreadEnvMode).toBe("active-thread");
+    expect(settings.projectSettingsOverrides.project?.defaultThreadEnvMode).toBe("active-thread");
+    expect(encodeServerSettings(settings).defaultThreadEnvMode).toBe("active-thread");
+    expect(
+      decodeServerSettingsPatch({ defaultThreadEnvMode: "active-thread" }).defaultThreadEnvMode,
+    ).toBe("active-thread");
+  });
   it("defaults the thread env mode to inherit and keeps stored values", () => {
     expect(decodeServerSettings({}).defaultThreadEnvMode).toBeNull();
     expect(decodeServerSettings({ defaultThreadEnvMode: "worktree" }).defaultThreadEnvMode).toBe(

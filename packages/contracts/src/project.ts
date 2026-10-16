@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
+import { RepositoryIdentity, NewThreadWorkspace } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import {
   CommandId,
@@ -156,7 +156,7 @@ export const Project = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(ReceivedProjectIcon)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
-  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  defaultThreadEnvMode: Schema.optional(Schema.NullOr(NewThreadWorkspace)),
   // Opt-in because background sync performs network I/O and may move the checkout.
   autoPull: Schema.optional(Schema.Boolean),
   scripts: Schema.Array(ProjectScript),
@@ -198,7 +198,7 @@ export const ProjectUpdatePayload = Schema.Struct({
   autoPull: Schema.optional(Schema.Boolean),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  defaultThreadEnvMode: Schema.optional(Schema.NullOr(NewThreadWorkspace)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
 });
 export type ProjectUpdatePayload = typeof ProjectUpdatePayload.Type;

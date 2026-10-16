@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
-import { ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
+import { NewThreadWorkspace, WorktreeSubmodules } from "./environment.ts";
 import { ProjectScriptIcon } from "./project.ts";
 import type { ProjectScopedServerSettingKey, ServerSettings } from "./settings.ts";
 
@@ -86,9 +86,9 @@ export const T3ProjectFile = Schema.Struct({
     ),
   ),
   defaultThreadEnvMode: Schema.optionalKey(
-    ThreadEnvMode.annotate({
+    NewThreadWorkspace.annotate({
       description:
-        'Where new threads start for this repository: "worktree" for a fresh git worktree, "local" for the current checkout. A per-project setting in T3 Code overrides this; when neither is set, the global default applies.',
+        'Where new threads start for this repository: "worktree" for a fresh git worktree, "local" for the project checkout, "active-thread" to reuse the active thread workspace (falling back to the project checkout). A per-project setting in T3 Code overrides this; when neither is set, the global default applies.',
     }),
   ),
   worktreeSubmodules: Schema.optionalKey(
