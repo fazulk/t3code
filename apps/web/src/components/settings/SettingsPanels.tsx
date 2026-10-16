@@ -2,6 +2,7 @@ import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { Spinner } from "~/components/ui/spinner";
+import { GlobalActionsSettings } from "./GlobalActionsSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
@@ -3011,6 +3012,10 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      {isEnvironmentScope && scope.kind !== "project" && scope.kind !== "checkout" ? (
+        <GlobalActionsSettings environmentId={environmentId} />
+      ) : null}
 
       <SettingsSection id="projects-and-threads" title="Projects & threads">
         <SettingsRow

@@ -7,6 +7,7 @@ import {
   AuthSourceControlWriteScope,
   EnvironmentId,
   type GitRunStackedActionResult,
+  type GlobalAction,
   type ProjectScript,
   ThreadId,
   type VcsStatusResult,
@@ -104,12 +105,16 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly canOperateTerminal: boolean;
   readonly canOpenFiles: boolean;
   readonly projectScripts: ReadonlyArray<ProjectScript>;
+  readonly globalActions: ReadonlyArray<GlobalAction>;
+  readonly canRunGlobalAction: boolean;
   readonly terminalSessions: ReadonlyArray<TerminalMenuSession>;
   readonly showActionControls?: boolean;
   readonly showDirectFileControl?: boolean;
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
   readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
+  /** Starts a new thread in this thread's project from the action's prompt. */
+  readonly onRunGlobalAction: (action: GlobalAction) => Promise<void>;
 };
 
 function useThreadGitControlModel(props: ThreadGitMenuProps) {
@@ -306,6 +311,23 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
                   },
                 ]
               : []),
+            ...(props.globalActions.length > 0
+              ? [
+                  {
+                    inline: true,
+                    items: props.globalActions.map((action) => ({
+                      description: action.prompt,
+                      disabled: !props.canRunGlobalAction,
+                      icon: { name: projectScriptMenuIcon(action.icon), type: "sfSymbol" as const },
+                      label: action.name,
+                      onPress: () => void props.onRunGlobalAction(action),
+                      type: "action" as const,
+                    })),
+                    label: "Global actions",
+                    type: "submenu" as const,
+                  },
+                ]
+              : []),
             ...props.terminalSessions.map((session) => ({
               description: [
                 getTerminalStatusLabel({
@@ -421,10 +443,13 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.canOpenFiles,
       props.canOpenTerminal,
       props.canOperateTerminal,
+      props.canRunGlobalAction,
+      props.globalActions,
       props.gitStatus,
       props.onMergeBack,
       props.onOpenNewTerminal,
       props.onOpenTerminal,
+      props.onRunGlobalAction,
       props.onRunProjectScript,
       props.projectScripts,
       props.terminalSessions,
@@ -495,6 +520,21 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
               <Toolbar.Label>No project scripts</Toolbar.Label>
             </Toolbar.MenuAction>
           )}
+          {props.globalActions.length > 0 ? (
+            <NativeHeaderToolbar.Menu title="Global actions" inline>
+              {props.globalActions.map((action) => (
+                <NativeHeaderToolbar.MenuAction
+                  key={action.id}
+                  icon={projectScriptMenuIcon(action.icon)}
+                  disabled={!props.canRunGlobalAction}
+                  onPress={() => void props.onRunGlobalAction(action)}
+                  subtitle={action.prompt}
+                >
+                  <NativeHeaderToolbar.Label>{action.name}</NativeHeaderToolbar.Label>
+                </NativeHeaderToolbar.MenuAction>
+              ))}
+            </NativeHeaderToolbar.Menu>
+          ) : null}
           {props.terminalSessions.map((session) => (
             <Toolbar.MenuAction
               key={session.terminalId}

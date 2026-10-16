@@ -3,6 +3,21 @@
   "iconPath": "assets/dev/blueprint-web-apple-touch-180.png",
   "scripts": [
     {
+      "name": "Lint",
+      "command": "vp run lint",
+      "icon": "lint"
+    },
+    {
+      "name": "Update T3 Code (Codex)",
+      "command": "./update-app.sh codex",
+      "icon": "build"
+    },
+    {
+      "name": "Update T3 Code (Claude)",
+      "command": "./update-app.sh claude",
+      "icon": "build"
+    },
+    {
       "name": "Setup Worktree",
       "command": "node scripts/setup-worktree.ts",
       "icon": "configure",

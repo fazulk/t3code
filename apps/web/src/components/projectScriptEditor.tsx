@@ -85,6 +85,38 @@ export function ScriptIcon({
   return <PlayIcon className={className} />;
 }
 
+/** The icon choices shown in an action editor's icon popover. */
+export function ScriptIconGrid({
+  icon,
+  onSelect,
+}: {
+  icon: ProjectScriptIcon;
+  onSelect: (icon: ProjectScriptIcon) => void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {SCRIPT_ICONS.map((entry) => {
+        const isSelected = entry.id === icon;
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs dark:border-transparent ${
+              isSelected
+                ? "border-primary/70 bg-primary/10 ring-inset dark:ring-1 dark:ring-primary/30"
+                : "border-border/70 hover:bg-accent/60 dark:bg-white/[0.035]"
+            }`}
+            onClick={() => onSelect(entry.id)}
+          >
+            <ScriptIcon icon={entry.id} className="size-4" />
+            <span>{entry.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export interface NewProjectScriptInput {
   name: string;
   command: string;
@@ -347,29 +379,13 @@ export function ProjectScriptEditorDialog({
                         <ScriptIcon icon={icon} className="size-4.5" />
                       </PopoverTrigger>
                       <PopoverPopup align="start">
-                        <div className="grid grid-cols-3 gap-2">
-                          {SCRIPT_ICONS.map((entry) => {
-                            const isSelected = entry.id === icon;
-                            return (
-                              <button
-                                key={entry.id}
-                                type="button"
-                                className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs dark:border-transparent ${
-                                  isSelected
-                                    ? "border-primary/70 bg-primary/10 ring-inset dark:ring-1 dark:ring-primary/30"
-                                    : "border-border/70 hover:bg-accent/60 dark:bg-white/[0.035]"
-                                }`}
-                                onClick={() => {
-                                  setIcon(entry.id);
-                                  setIconPickerOpen(false);
-                                }}
-                              >
-                                <ScriptIcon icon={entry.id} className="size-4" />
-                                <span>{entry.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
+                        <ScriptIconGrid
+                          icon={icon}
+                          onSelect={(next) => {
+                            setIcon(next);
+                            setIconPickerOpen(false);
+                          }}
+                        />
                       </PopoverPopup>
                     </Popover>
                     <Input

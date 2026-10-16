@@ -7,6 +7,7 @@ import type {
 } from "@t3tools/contracts";
 
 import type { DraftId } from "../../composerDraftStore";
+import type { GlobalActionHost } from "../../hooks/useGlobalActions";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import { type EnvMode, type EnvironmentOption } from "../BranchToolbar.logic";
 import { BranchToolbar } from "../BranchToolbar";
@@ -34,6 +35,7 @@ export interface ThreadDetailsPanelProps extends Pick<
   threadId: ThreadId;
   draftId?: DraftId;
   activeProjectName: string | undefined;
+  globalActionHost?: GlobalActionHost | undefined;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -134,6 +136,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               {props.activeProjectScripts ? (
                 <ProjectScriptsControl
                   environmentId={props.environmentId}
+                  globalActionHost={props.globalActionHost}
                   displayMode="panel"
                   scripts={props.activeProjectScripts}
                   fileScripts={fileScripts}
