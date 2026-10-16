@@ -6,7 +6,7 @@ const testState = vi.hoisted(() => {
   let projectFileRead = Promise.resolve<null>(null);
   let projectRemoved = false;
   let targetSettings = {
-    defaultThreadEnvMode: "local" as "local" | "worktree",
+    defaultThreadEnvMode: "local" as "local" | "worktree" | "active-thread",
     newWorktreesStartFromOrigin: false,
     defaultModelSelection: null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
@@ -16,6 +16,12 @@ const testState = vi.hoisted(() => {
     readonly environmentId: string;
     readonly promotedTo: null;
     readonly threadId: string;
+  } | null = null;
+  let sourceThread: {
+    environmentId: string;
+    projectId: string;
+    branch: string | null;
+    worktreePath: string | null;
   } | null = null;
   const router = {
     state: {
@@ -55,11 +61,12 @@ const testState = vi.hoisted(() => {
     reset(
       nextStoredDraft: typeof storedDraft,
       workspaceDefaults = {
-        envMode: "local" as "local" | "worktree",
+        envMode: "local" as "local" | "worktree" | "active-thread",
         startFromOrigin: false,
       },
     ) {
       storedDraft = nextStoredDraft;
+      sourceThread = null;
       projectRemoved = false;
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
@@ -76,6 +83,12 @@ const testState = vi.hoisted(() => {
       });
     },
     router,
+    get sourceThread() {
+      return sourceThread;
+    },
+    setSourceThread(value: typeof sourceThread) {
+      sourceThread = value;
+    },
   };
 });
 
@@ -101,11 +114,15 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({
+vi.mock("@t3tools/contracts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/contracts")>()),
   DEFAULT_RUNTIME_MODE: "default",
   DEFAULT_SERVER_SETTINGS: {},
 }));
-vi.mock("@t3tools/shared/projectSettings", () => ({
+vi.mock("@t3tools/shared/projectSettings", async (importOriginal) => ({
+  resolveActiveThreadWorkspace: (
+    await importOriginal<typeof import("@t3tools/shared/projectSettings")>()
+  ).resolveActiveThreadWorkspace,
   resolveProjectSettings: (
     settings: Record<string, unknown>,
     _projectId: unknown,
@@ -174,7 +191,8 @@ vi.mock("../state/entities", () => {
   return {
     readProject: () => (testState.projectRemoved ? null : project),
     readProjects: () => (testState.projectRemoved ? [] : [project]),
-    readThreadShell: () => null,
+    readThreadShell: (ref: { threadId: string }) =>
+      ref.threadId === "source" ? testState.sourceThread : null,
     readThreadShells: () => [],
     useProjects: () => [],
     useThread: () => null,
@@ -184,7 +202,15 @@ vi.mock("../state/server", () => ({
   environmentServerConfigsAtom: {},
   primaryServerSettingsAtom: "primary-settings",
 }));
-vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
+vi.mock("../threadRoutes", () => ({
+  resolveThreadRouteTarget: () =>
+    testState.sourceThread
+      ? {
+          kind: "server",
+          threadRef: { environmentId: testState.sourceThread.environmentId, threadId: "source" },
+        }
+      : null,
+}));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
   useUiStateStore: () => [],
@@ -205,6 +231,53 @@ describe.each([
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
+  it("inherits the active thread worktree for both fresh and reusable drafts", async () => {
+    testState.reset(draft);
+    testState.targetSettings.defaultThreadEnvMode = "active-thread";
+    testState.setSourceThread({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+      branch: "feature",
+      worktreePath: "/remote/worktrees/feature",
+    });
+    const opened = await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      expect.anything(),
+      opened!.draftId,
+      expect.objectContaining({
+        branch: "feature",
+        worktreePath: "/remote/worktrees/feature",
+        envMode: "worktree",
+        startFromOrigin: false,
+      }),
+    );
+  });
+
+  it("lets explicit workspace choices override inheritance", async () => {
+    testState.reset(draft);
+    testState.targetSettings.defaultThreadEnvMode = "active-thread";
+    testState.setSourceThread({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+      branch: "feature",
+      worktreePath: "/remote/worktrees/feature",
+    });
+    const opened = await useNewThreadHandler()(
+      { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+      { envMode: "local", branch: null, worktreePath: null },
+    );
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      expect.anything(),
+      opened!.draftId,
+      expect.objectContaining({ branch: null, worktreePath: null, envMode: "local" }),
+    );
+  });
+
   it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
     "uses the target environment's %s permissions for new threads",
     async (runtimeMode) => {

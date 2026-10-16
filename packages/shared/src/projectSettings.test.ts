@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   ProjectId,
   ProviderDriverKind,
@@ -11,6 +12,7 @@ import {
   clearProjectSettingsOverrides,
   hasProjectSettingsOverrides,
   resolveNewThreadEnvMode,
+  resolveActiveThreadWorkspace,
   resolveProjectFileBackedSetting,
   resolveProjectSettings,
   resolveWorktreeCleanup,
@@ -30,6 +32,7 @@ describe("resolveProjectSettings", () => {
     }
     expect(resolveProjectSettings(DEFAULT_SERVER_SETTINGS, null).settings).toBe(
       DEFAULT_SERVER_SETTINGS,
+      EnvironmentId,
     );
   });
 
@@ -54,6 +57,7 @@ describe("resolveProjectSettings", () => {
   it("treats a null project like an absent one before the shell snapshot arrives", () => {
     expect(resolveProjectSettings(DEFAULT_SERVER_SETTINGS, null, null).settings).toBe(
       DEFAULT_SERVER_SETTINGS,
+      EnvironmentId,
     );
   });
 
@@ -251,6 +255,7 @@ describe("resolveProjectSettings with a t3.json", () => {
   it("leaves settings untouched when no file is passed", () => {
     expect(resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId).settings).toBe(
       DEFAULT_SERVER_SETTINGS,
+      EnvironmentId,
     );
   });
 });
@@ -508,4 +513,52 @@ it("inherits branch naming defaults and applies project overrides independently"
     },
   });
   expect(resolveProjectSettings(cleared, projectId).settings.branchNamingMode).toBe("static");
+});
+
+describe("resolveActiveThreadWorkspace", () => {
+  const projectRef = { environmentId: EnvironmentId.make("local"), projectId };
+  const activeThread = {
+    ...projectRef,
+    branch: "feature",
+    worktreePath: "/repo/worktrees/feature",
+  };
+
+  it("inherits the exact active worktree", () => {
+    expect(
+      resolveActiveThreadWorkspace({ workspace: "active-thread", projectRef, activeThread }),
+    ).toEqual({
+      branch: "feature",
+      worktreePath: "/repo/worktrees/feature",
+      envMode: "worktree",
+      startFromOrigin: false,
+    });
+  });
+
+  it.each([
+    null,
+    { ...activeThread, projectId: otherProjectId },
+    { ...activeThread, environmentId: EnvironmentId.make("remote") },
+  ])("falls back to the project checkout without a matching active thread", (source) => {
+    expect(
+      resolveActiveThreadWorkspace({
+        workspace: "active-thread",
+        projectRef,
+        activeThread: source,
+      }),
+    ).toEqual({ branch: null, worktreePath: null, envMode: "local", startFromOrigin: false });
+  });
+
+  it("inherits a project checkout without requesting a new worktree", () => {
+    expect(
+      resolveActiveThreadWorkspace({
+        workspace: "active-thread",
+        projectRef,
+        activeThread: { ...activeThread, worktreePath: null },
+      }),
+    ).toEqual({ branch: "feature", worktreePath: null, envMode: "local", startFromOrigin: false });
+  });
+
+  it.each(["local", "worktree"] as const)("leaves the %s default unchanged", (workspace) => {
+    expect(resolveActiveThreadWorkspace({ workspace, projectRef, activeThread })).toBeNull();
+  });
 });

@@ -105,28 +105,31 @@ describe("planProjectCommand", () => {
     );
   });
 
-  it("carries every edited field and omits the rest", () => {
-    const scripts = [script("lint")];
-    const payload = payloadOf(
-      update({
+  it.each(["worktree", "active-thread"] as const)(
+    "carries the %s workspace default and omits unedited fields",
+    (workspace) => {
+      const scripts = [script("lint")];
+      const payload = payloadOf(
+        update({
+          scripts,
+          defaultThreadEnvMode: workspace,
+          autoPull: true,
+          faviconPath: "brand/icon.svg",
+          projectIcon: { kind: "lucide", name: "alarm-clock", color: "violet" },
+        }),
+      );
+      assert.deepInclude(payload, {
         scripts,
-        defaultThreadEnvMode: "worktree",
+        defaultThreadEnvMode: workspace,
         autoPull: true,
         faviconPath: "brand/icon.svg",
         projectIcon: { kind: "lucide", name: "alarm-clock", color: "violet" },
-      }),
-    );
-    assert.deepInclude(payload, {
-      scripts,
-      defaultThreadEnvMode: "worktree",
-      autoPull: true,
-      faviconPath: "brand/icon.svg",
-      projectIcon: { kind: "lucide", name: "alarm-clock", color: "violet" },
-    });
-    const renamed = payloadOf(update({ title: "Renamed" }));
-    assert.isFalse("defaultThreadEnvMode" in renamed);
-    assert.isNull(payloadOf(update({ defaultThreadEnvMode: null })).defaultThreadEnvMode);
-  });
+      });
+      const renamed = payloadOf(update({ title: "Renamed" }));
+      assert.isFalse("defaultThreadEnvMode" in renamed);
+      assert.isNull(payloadOf(update({ defaultThreadEnvMode: null })).defaultThreadEnvMode);
+    },
+  );
 
   it.each(["install-javascript-dependencies", "A", "a.b", "a b", "-a", "a".repeat(25)])(
     "rejects a new script ID that cannot have a shortcut: %s",

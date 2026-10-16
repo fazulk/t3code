@@ -1,5 +1,6 @@
 import {
   type ModelSelection,
+  type ScopedProjectRef,
   PROJECT_FILE_BACKED_SETTINGS,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectFileBackedSettingKey,
@@ -11,6 +12,7 @@ import {
   type ServerSettings,
   type T3ProjectFile,
   type ThreadEnvMode,
+  type NewThreadWorkspace,
   type WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { normalizeProjectPathForComparison } from "./path.ts";
@@ -53,7 +55,7 @@ export function hasProjectSettingsOverrides(
  */
 export interface LegacyProjectSettingsFields {
   readonly defaultModelSelection?: ModelSelection | null | undefined;
-  readonly defaultThreadEnvMode?: ThreadEnvMode | null | undefined;
+  readonly defaultThreadEnvMode?: NewThreadWorkspace | null | undefined;
 }
 
 export function resolveProjectSettings(
@@ -185,6 +187,7 @@ export function resolveNewThreadEnvMode(input: {
   readonly projectHasThreads: boolean;
 }): ThreadEnvMode {
   const configured = input.projectSettings.settings.defaultThreadEnvMode;
+  if (configured === "active-thread") return "local";
   if (
     configured === "local" ||
     input.projectHasThreads ||
@@ -203,6 +206,31 @@ export function resolveNewThreadEnvMode(input: {
     folder.length > prefix.length &&
     !folder.slice(prefix.length).includes(separator);
   return isNewProjectFolder ? "local" : configured;
+}
+
+export function resolveActiveThreadWorkspace(input: {
+  readonly workspace: NewThreadWorkspace | null;
+  readonly projectRef: ScopedProjectRef;
+  readonly activeThread:
+    | (ScopedProjectRef & {
+        readonly branch: string | null;
+        readonly worktreePath: string | null;
+      })
+    | null;
+}) {
+  if (input.workspace !== "active-thread") return null;
+  const source = input.activeThread;
+  const matches =
+    source !== null &&
+    source.environmentId === input.projectRef.environmentId &&
+    source.projectId === input.projectRef.projectId;
+  const worktreePath = matches ? source.worktreePath : null;
+  return {
+    branch: matches ? source.branch : null,
+    worktreePath,
+    envMode: worktreePath === null ? ("local" as const) : ("worktree" as const),
+    startFromOrigin: false,
+  };
 }
 
 export function withProjectSettingsOverrides(

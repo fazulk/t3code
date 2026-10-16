@@ -221,15 +221,19 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <Select
           value={mixedWorkspace ? null : (effective?.defaultThreadEnvMode ?? null)}
           onValueChange={(value) => {
-            if (value === "local" || value === "worktree")
+            if (value === "local" || value === "worktree" || value === "active-thread")
               updateSettings({ defaultThreadEnvMode: value });
           }}
         >
           <SelectTrigger size="sm" aria-label="Default workspace">
             <SelectValue>
               {(value: string | null) =>
-                value === "local" || value === "worktree"
-                  ? resolveEnvModeLabel(value)
+                value === "local" || value === "worktree" || value === "active-thread"
+                  ? value === "active-thread"
+                    ? "Same as active thread"
+                    : value === "local"
+                      ? "Project checkout"
+                      : resolveEnvModeLabel(value)
                   : unavailable
                     ? "Unavailable"
                     : "Mixed"
@@ -237,7 +241,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             </SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
+            <SelectItem value="local">Project checkout</SelectItem>
+            <SelectItem value="active-thread">Same as active thread</SelectItem>
             <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
           </SelectPopup>
         </Select>

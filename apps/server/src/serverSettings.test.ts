@@ -2087,6 +2087,29 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     },
   );
 
+  it.effect("persists active-thread workspace defaults at environment and project scope", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const projectId = ProjectId.make("project-workspace-default");
+      yield* service.updateSettings({
+        defaultThreadEnvMode: "active-thread",
+        projectSettingsOverrides: { [projectId]: { defaultThreadEnvMode: "active-thread" } },
+      });
+      const persisted = yield* decodeServerSettings(
+        JSON.parse(yield* fileSystem.readFileString(serverConfig.settingsPath)),
+      );
+      assert.strictEqual(persisted.defaultThreadEnvMode, "active-thread");
+      assert.strictEqual(
+        persisted.projectSettingsOverrides[projectId]?.defaultThreadEnvMode,
+        "active-thread",
+      );
+      yield* service.updateSettings({ defaultThreadEnvMode: "local" });
+      assert.strictEqual((yield* service.getSettings).defaultThreadEnvMode, "local");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("folds legacy project overrides into projectSettingsOverrides once", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;
