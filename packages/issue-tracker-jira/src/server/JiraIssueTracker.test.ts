@@ -159,6 +159,31 @@ it.effect("checks the saved site before any request and reads updated credential
   }),
 );
 
+it.effect("searches ticket keys and numbers alongside issue text within the selected filters", () =>
+  Effect.gen(function* () {
+    const f = fakeJira(() => ({ body: { issues: [], isLast: true } }));
+    const api = yield* f.api;
+    for (const [query, clause] of [
+      ["LMD-1917", '(key = "LMD-1917" OR text ~ "LMD-1917")'],
+      [" lmd-1917 ", '(key = "LMD-1917" OR text ~ "lmd-1917")'],
+      ["1917", '(key = "ENG-1917" OR text ~ "1917")'],
+      ["signup", 'text ~ "signup"'],
+    ] as const) {
+      yield* api.listIssues({
+        ...target,
+        state: "open",
+        involvement: "assigned",
+        viewer: "native-account",
+        query,
+        limit: 100,
+      });
+      expect(body(f.calls.at(-1))).toMatchObject({
+        jql: `project = "ENG" AND statusCategory != "done" AND assignee = currentUser() AND ${clause} ORDER BY updated DESC`,
+      });
+    }
+  }),
+);
+
 it.effect("makes one enhanced search request for open issues and preserves native cursors", () =>
   Effect.gen(function* () {
     const f = fakeJira(() => ({

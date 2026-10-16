@@ -139,16 +139,31 @@ const actions = () =>
     .map((button) => button.textContent ?? "")
     .filter((label) => /Reopen|Close|Move to/.test(label));
 
+const renderStateControl = (
+  current: IssueState,
+  closeReasons: ReadonlyArray<string>,
+  states: ReadonlyArray<IssueState> = generic,
+  extra: Partial<IssueDetail> = {},
+) => render(current, closeReasons, states, { tracker: IssueTrackerKind.make("linear"), ...extra });
+
+it("does not offer state changes for Jira tickets", async () => {
+  await render({ category: "open", name: "To Do" }, []);
+  expect(actions()).toEqual([]);
+  expect(container.querySelector('a[aria-label="Open in BetterJira"]')?.getAttribute("href")).toBe(
+    "betterjira://issue/ENG-1",
+  );
+});
+
 it.each([
   [{ category: "open", name: "In Progress" }, ["Close"]],
   [{ category: "closed", name: "Done" }, ["Reopen"]],
 ] as const)("offers only the opposite of a native %j state", async (current, expected) => {
-  await render(current, []);
+  await renderStateControl(current, []);
   expect(actions()).toEqual(expected);
 });
 
 it("keeps a native closed state's other close reason and its reopen", async () => {
-  await render({ category: "closed", name: "Canceled", closeReason: "canceled" }, [
+  await renderStateControl({ category: "closed", name: "Canceled", closeReason: "canceled" }, [
     "completed",
     "canceled",
   ]);
@@ -165,12 +180,12 @@ it("keeps a native closed state's other close reason and its reopen", async () =
 });
 
 it("keeps every close reason for a closed issue that recorded none", async () => {
-  await render({ category: "closed", name: "closed" }, ["completed", "not-planned"]);
+  await renderStateControl({ category: "closed", name: "closed" }, ["completed", "not-planned"]);
   expect(actions()).toEqual(["Reopen", "Close as completed", "Close as not planned"]);
 });
 
 it("keeps a named workflow's other states and hides only the current one", async () => {
-  await render(
+  await renderStateControl(
     { category: "open", name: "Active" },
     [],
     [
@@ -183,7 +198,7 @@ it("keeps a named workflow's other states and hides only the current one", async
 });
 
 it("offers both close reasons from a native open state", async () => {
-  await render({ category: "open", name: "Todo" }, ["completed", "canceled"]);
+  await renderStateControl({ category: "open", name: "Todo" }, ["completed", "canceled"]);
   expect(actions()).toEqual(["Close", "Close as completed", "Close as canceled"]);
 });
 
@@ -209,7 +224,7 @@ it.each([
 ] as const)(
   "offers the issue's own native states over the tracker's generic ones",
   async (native, pick, expected) => {
-    await render({ category: "open", name: "To Do" }, [], generic, { states: native });
+    await renderStateControl({ category: "open", name: "To Do" }, [], generic, { states: native });
     expect(actions()).toEqual(expected);
     await act(async () =>
       [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
