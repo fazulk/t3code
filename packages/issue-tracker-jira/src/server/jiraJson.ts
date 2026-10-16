@@ -306,7 +306,16 @@ export function buildJql(input: {
   if (input.involvement === "authored") clauses.push("creator = currentUser()");
   if (input.involvement === "mentioned")
     throw new Error("Jira does not support mention filtering.");
-  if (input.query !== undefined) clauses.push("text ~ " + quoteJiraJql(input.query));
+  const query = input.query?.trim();
+  if (query) {
+    const key = /^[A-Z][A-Z0-9_]*-[1-9]\d*$/i.test(query)
+      ? query.toUpperCase()
+      : /^[1-9]\d*$/.test(query) && /^[A-Z][A-Z0-9_]*$/i.test(input.scope)
+        ? `${input.scope.toUpperCase()}-${query}`
+        : null;
+    const text = "text ~ " + quoteJiraJql(query);
+    clauses.push(key === null ? text : `(key = ${quoteJiraJql(key)} OR ${text})`);
+  }
   return clauses.join(" AND ") + " ORDER BY updated DESC";
 }
 

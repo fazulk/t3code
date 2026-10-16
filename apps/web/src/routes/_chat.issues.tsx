@@ -984,7 +984,7 @@ function IssuesRoute() {
           <div className="topbar-scroll-fade scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto">
             <WorkspacePageContainer width="expanded" className="min-h-full gap-4">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-0 basis-full @lg/issue-list:basis-0 @lg/issue-list:flex-1">
+                <div className="min-w-0 basis-full @lg/issue-list:min-w-64 @lg/issue-list:basis-0 @lg/issue-list:flex-1">
                   <PullRequestSearchInput
                     value={search.q ?? ""}
                     busy={
@@ -992,7 +992,7 @@ function IssuesRoute() {
                       (debouncedQuery.length > 0 && list.isPending)
                     }
                     onChange={(q) => updateSearch({ q: q || undefined })}
-                    placeholder="Search issues, or label:bug"
+                    placeholder="Search issues by ticket number or text"
                     aria-label="Search issues"
                   />
                 </div>

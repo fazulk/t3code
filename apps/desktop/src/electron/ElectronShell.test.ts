@@ -36,6 +36,21 @@ describe("ElectronShell", () => {
     }).pipe(Effect.provide(ElectronShell.layer)),
   );
 
+  it.effect("opens only supported BetterJira ticket links", () =>
+    Effect.gen(function* () {
+      openExternalMock.mockResolvedValue(undefined);
+      const electronShell = yield* ElectronShell.ElectronShell;
+      const results = yield* Effect.all([
+        electronShell.openExternal("betterjira://issue/LMD-65"),
+        electronShell.openExternal("betterjira://settings/LMD-65"),
+        electronShell.openExternal("betterjira://user@issue/LMD-65"),
+        electronShell.openExternal("betterjira://issue/LMD-65?redirect=https://example.com"),
+      ]);
+      assert.deepEqual(results, [true, false, false, false]);
+      assert.deepEqual(openExternalMock.mock.calls, [["betterjira://issue/LMD-65"]]);
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  );
+
   it.effect("copies text to the system clipboard", () =>
     Effect.gen(function* () {
       writeTextMock.mockResolvedValue(undefined);
