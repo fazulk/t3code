@@ -306,6 +306,7 @@ import {
   slashCommandItemsForPromptPosition,
 } from "./composerSlashCommandSearch";
 import {
+  cycleComposerThinkingLevel,
   getComposerPromptInjectionState,
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -1444,6 +1445,7 @@ export interface ChatComposerHandle {
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   openControl: (command: KeybindingCommand) => void;
+  cycleThinkingLevel: (direction: -1 | 1) => void;
   isModelPickerOpen: () => boolean;
   isCaretAtStart: () => boolean;
   compactContext: () => void;
@@ -1945,6 +1947,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           })
       : null);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
@@ -2867,6 +2870,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     scheduleComposerFocus();
   };
   const setPromptFromTraitsStable = useStableCallback(setPromptFromTraits);
+  const cycleThinkingLevel = useStableCallback((direction: -1 | 1) => {
+    if (noProviderAvailable || isLiteralPendingAnswer || isChoiceOnlyPendingQuestion) return;
+    const next = cycleComposerThinkingLevel({
+      provider: selectedProvider,
+      instanceId: selectedInstanceId,
+      model: selectedModel,
+      models: selectedProviderModels,
+      modelOptions: composerModelOptions?.[selectedInstanceId],
+      reportedModelSelection,
+      prompt: promptRef.current,
+      planModeEnabled: settings.planModeEnabled,
+      direction,
+    });
+    if (!next) return;
+    setProviderModelOptions(composerDraftTarget, selectedProvider, next.modelOptions, {
+      instanceId: selectedInstanceId,
+      model: selectedModel,
+      persistSticky: true,
+    });
+    if (next.prompt !== promptRef.current) setPromptFromTraitsStable(next.prompt);
+  });
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
@@ -6090,6 +6114,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
         ),
       openModelPicker: openModelPickerStable,
+      cycleThinkingLevel,
       toggleModelPicker: () => {
         if (isComposerModelPickerOpen) {
           setIsComposerModelPickerOpen(false);
@@ -6253,6 +6278,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       applyPromptReplacementStable,
       isComposerModelPickerOpen,
       openModelPickerStable,
+      cycleThinkingLevel,
       readComposerSnapshotStable,
       resetComposerTrigger,
       setComposerTrigger,
