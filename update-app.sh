@@ -133,7 +133,10 @@ fi
 
 [[ "$(uname -s)" == Darwin ]] || fail 'This installer supports macOS only.'
 command -v "$agent" >/dev/null 2>&1 || fail "$agent is not on PATH."
-command -v vp >/dev/null 2>&1 || fail 'vp is not on PATH.'
+if ! command -v vp >/dev/null 2>&1; then
+  [[ -x "$repo_dir/node_modules/.bin/vp" ]] || fail 'vp is not on PATH and node_modules/.bin/vp is missing. Install Vite+ or the checkout dependencies first.'
+  export PATH="$repo_dir/node_modules/.bin:$PATH"
+fi
 for operation in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
   [[ ! -e "$(git rev-parse --git-path "$operation")" ]] || fail "Finish the active Git operation ($operation) first."
 done

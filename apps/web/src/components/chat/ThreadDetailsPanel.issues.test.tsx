@@ -38,7 +38,9 @@ vi.mock("../../state/entities", () => ({
   useProject: () => state.project,
   useThreadShell: () => (state.draft ? null : state.thread),
   useThreadShellsForProjectRefs: () => [],
+  useServerConfigs: () => new Map(),
 }));
+vi.mock("../../state/issues", () => ({ issueEnvironment: { list: () => null } }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.command }));
 vi.mock("../../state/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../state/session")>()),
@@ -49,6 +51,7 @@ vi.mock("../../state/query", () => ({
   useEnvironmentQuery: () => ({ data: null, isPending: false, error: null, refresh: vi.fn() }),
 }));
 vi.mock("../../state/queries", () => ({
+  useDebouncedValue: (value: string) => value,
   usePaginatedBranches: () => ({
     refs: [],
     data: null,
